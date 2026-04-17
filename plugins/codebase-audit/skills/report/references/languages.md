@@ -4,6 +4,13 @@ Read only the sections for languages actually present in the repo. Each section 
 
 If a language is absent from this file, fall back to general principles from `dimensions.md` and say so in the report ("spot-checked using general practices, not language-specific conventions").
 
+**Cross-language IDE-adjacent signals (always probe):**
+- `.editorconfig` — style baseline enforced by most editors (indent, final newline, trim trailing whitespace). Presence is a low-bar positive; absence on a multi-contributor repo is a mild smell.
+- `.idea/inspectionProfiles/*.xml` — JetBrains (PhpStorm / WebStorm / IntelliJ / PyCharm / GoLand / RubyMine / Rider) project-committed inspection profile. When present, **open the XML and enumerate which `<inspection_tool>` entries are `enabled="true"` vs `enabled="false"`**. This is the team's de facto quality gate if CI is absent; the set of enabled inspections is the signal, not the mere existence of the file.
+- `.vscode/settings.json` + `.vscode/extensions.json` — committed VS Code project config. `settings.json` controls linter/formatter activation; `extensions.json` `recommendations` is a soft-hint to contributors.
+
+Treat IDE-enforced rules as **weaker than CI-enforced rules** (see `dimensions.md` §6): they depend on every contributor using that specific IDE, they run manually rather than on every PR, and they don't gate merges. Always report the IDE profile + the CI absence as distinct findings — credit dev-time enforcement, but still flag the missing CI gate.
+
 ---
 
 ## Python
@@ -26,6 +33,10 @@ If a language is absent from this file, fall back to general principles from `di
 - Async: `grep -rn "def " --include="*.py" | wc -l` vs `grep -rn "async def" --include="*.py" | wc -l`. If mostly async, check for blocking calls: `grep -rn "requests\.\|time\.sleep\|open(" --include="*.py"` in async functions.
 - `asyncio.gather` on the same session/connection is a footgun — grep for `asyncio.gather` and spot-check the scope.
 - Pydantic vs dataclasses: Pydantic for I/O boundary, dataclasses/TypedDict for internal shapes.
+
+**IDE-level enforcement (probe these):**
+- `.vscode/settings.json` — `python.analysis.typeCheckingMode` (Pylance), `python.linting.mypyEnabled`, `python.linting.ruffEnabled`, `python.formatting.provider`.
+- `.idea/inspectionProfiles/*.xml` (PyCharm) — look for `PyPep8Inspection`, `PyTypeCheckerInspection`, `PyUnresolvedReferencesInspection`, `PyMypyInspection`, and whether they are `enabled="true"`. Cross-reference with `mypy.ini` / `pyproject.toml` `[tool.mypy]` / `[tool.ruff]` — a config that exists on disk but isn't activated anywhere (IDE or CI) is "configured but dead."
 
 **Frameworks-specific:**
 - **FastAPI:** Look for `APIRouter` prefix discipline (routers own `prefix=` not path). `Depends(current_active_user)` uniformly applied. `BaseModel` for every request/response shape.
@@ -57,6 +68,12 @@ If a language is absent from this file, fall back to general principles from `di
 - Bundle analysis: `vite-bundle-visualizer`, `webpack-bundle-analyzer`, or just `ls -la dist/assets/` after `npm run build`.
 - Code splitting: `grep -rn "React.lazy\|lazy(\|import(\"\|dynamic(" src/`.
 - Heavy deps in initial bundle: check `package.json` for `recharts`, `chart.js`, `d3`, `three`, `react-pdf`, etc., then check whether they're imported from route-level entry points.
+- **Build-time type-checking bypass:** in webpack configs, look for `transpileOnly: true` on `ts-loader`; in Vite, `esbuild`-based TS transforms also skip type-checking by default. If present and no `tsc --noEmit` runs in CI or as a pre-build step, TS errors are compiled into prod.
+
+**IDE-level enforcement (probe these):**
+- `.vscode/settings.json` — `typescript.validate.enable`, `eslint.enable`, `editor.codeActionsOnSave` (esp. `source.fixAll.eslint`), `typescript.tsdk` pin.
+- `.vscode/extensions.json` — `recommendations` array nudges every contributor to install ESLint / Prettier / Biome. Soft hint, but committing it is meaningful signal.
+- `.idea/inspectionProfiles/*.xml` (WebStorm / IntelliJ) — look for `Eslint`, `TsLint` (legacy), `JSUnresolvedReference`, `JSUnusedGlobalSymbols`, `TypeScriptValidateJSTypes`. Cross-reference with `.eslintrc*` / `eslint.config.js` / `biome.json`: a config present but neither activated in the IDE profile nor run in CI is "configured but dead."
 
 **Frontend-specific:**
 - **React:** Check for `useEffect` dependency arrays, key warnings, state management pattern (TanStack Query, Redux, Zustand, Context only).
@@ -86,6 +103,10 @@ If a language is absent from this file, fall back to general principles from `di
 - Goroutines: check for missing `sync.WaitGroup` / errgroup; goroutines without termination paths.
 - Race testing: is `-race` enabled in CI tests?
 - Mutex vs channel discipline.
+
+**IDE-level enforcement (probe these):**
+- `.vscode/settings.json` — `go.lintTool` (`golangci-lint` / `staticcheck` / `revive`), `go.vetOnSave`, `go.formatTool` (`gofumpt` / `goimports`).
+- `.idea/inspectionProfiles/*.xml` (GoLand) — `GoUnusedImportInspection`, `GoErrorMisuse`, `GoLinter` (wires golangci-lint). Cross-reference `.golangci.yml` / `.golangci.yaml`: if present but neither IDE nor CI activates it, "configured but dead."
 
 **Coverage artifact paths:** `coverage.out`, `coverage.html`
 
@@ -127,6 +148,10 @@ If a language is absent from this file, fall back to general principles from `di
 - Raw JDBC: grep for string concat into `PreparedStatement`. Should be `?` placeholders.
 - `@Autowired` field injection vs constructor injection (constructor is idiomatic modern Spring).
 
+**IDE-level enforcement (probe these):**
+- `.idea/inspectionProfiles/*.xml` (IntelliJ IDEA) — `SpotBugs`, `CheckStyle-IDEA`, `Qodana`, `NullableProblems`, `unused`. Kotlin: `detekt`. Cross-reference with `checkstyle.xml`, `spotbugs-exclude.xml`, `detekt.yml` — config present but not activated anywhere is "configured but dead."
+- `.editorconfig` — often carries `dotnet_diagnostic.*` (shared convention with .NET) in JVM monorepos.
+
 **Coverage artifact paths:** `target/site/jacoco/index.html`, `build/reports/jacoco/`
 
 ---
@@ -145,6 +170,10 @@ If a language is absent from this file, fall back to general principles from `di
 **Probes:**
 - Rails: Strong Parameters everywhere, `find_by_sql` audits, N+1 detection via `bullet` gem.
 - Raw SQL injection: grep for string interpolation in `.where(` / `.find_by_sql`.
+
+**IDE-level enforcement (probe these):**
+- `.vscode/settings.json` — `ruby.useLanguageServer`, `ruby.lint` (rubocop / standard / reek).
+- `.idea/inspectionProfiles/*.xml` (RubyMine) — `RubyResolve`, `RubyArgCount`, `RubyLiteralArrayInspection`, `RubocopInspection`. Cross-reference with `.rubocop.yml` and Brakeman config — if present but only IDE-enforced, flag that CI doesn't run them.
 
 **Coverage artifact paths:** `coverage/.last_run.json`, `coverage/index.html`
 
@@ -172,6 +201,21 @@ If a language is absent from this file, fall back to general principles from `di
   - **Probe order:** first grep the migrations directory (`migrations/`, `db/migrate/`, `src/Migrations/`) for `ON DELETE`, `addForeignKey`, `->foreignKey(`, `CONSTRAINT ... FOREIGN KEY ... ON DELETE`. Only then check `@ORM\JoinColumn` / `#[ORM\JoinColumn]`. Report based on the stronger of the two.
 - **Laminas/Symfony/Laravel migration file globs:** phinx → `db/migrations/*.php` with `up()`/`change()`; Doctrine Migrations → `src/Migrations/Version*.php` with `up(Schema $schema)`; Laravel → `database/migrations/*.php` with `Schema::table(...)->foreign(...)->onDelete('cascade')`.
 
+**IDE-level enforcement (probe these — matters a lot in PHP shops, where PhpStorm-centric teams often skip CI):**
+- `.idea/inspectionProfiles/*.xml` (PhpStorm) — the single most important file to read when CI is absent or thin. Enumerate `<inspection_tool>` entries with `enabled="true"` and classify what's active. Common external-tool integrations and what their enabled state means:
+  - `PhpCSValidationInspection` — wires PHP_CodeSniffer into the editor. Still depends on `phpcs.xml` / `.phpcs.xml.dist` existing.
+  - `PhpCSFixerValidationInspection` — wires PHP-CS-Fixer; depends on `.php-cs-fixer.dist.php`.
+  - `MessDetectorValidationInspection` — wires PHPMD; depends on `phpmd.xml` or default rulesets (`CODESIZE`, `DESIGN`, `UNUSEDCODE`, `NAMING`, `CONTROVERSIAL` are PHPMD categories). Check which categories are toggled on inside the inspection options.
+  - `PhpStanGlobal` — wires PHPStan. **Critical:** read the `config` option inside — it points at e.g. `$PROJECT_DIR$/phpstan.neon.dist`. Then check `enabled=` on the inspection_tool itself. If `enabled="false"` *and* the `phpstan.neon.dist` file exists on disk *and* no CI step runs `vendor/bin/phpstan`, this is the canonical "configured but dead" case — report it by name.
+  - `PsalmGlobal` — same pattern as PhpStanGlobal but for Psalm (`psalm.xml`).
+  - `SecurityAdvisoriesInspection` — PhpStorm's built-in check that flags listed dev-only packages if they end up in production `require` (rather than `require-dev`). The `<option name="optionConfiguration">` list is the team's curated dev-package blocklist; count it and quote a few examples in the report.
+  - `ForgottenDebugOutputInspection` — flags `var_dump`, `print_r`, `error_log`, `phpinfo`, framework-specific debug helpers. When `level="ERROR"` and `enabled="true"`, this is a real quality gate against debug-print leaks.
+  - `DuplicatedCode` — PhpStorm's own duplicate-fragment detector. Read `<language minSize="N" name="PHP" />` to see the threshold; `minSize=60` is a sane default.
+  - `PhpFieldCanBePromotedInspection`, `PhpRedundantDocCommentInspection`, `PhpTraditionalSyntaxArrayLiteralInspection`, `PhpUnusedParameterInspection` — PhpStorm-native modernizations / cleanliness rules. Presence of enabled rules here signals a team that has consciously trimmed the default profile.
+  - `TsLint` — TypeScript-side enforcement inside a PHP project (often a webpack-driven frontend).
+- `.vscode/settings.json` — less common in PHP shops, but if present look for `intelephense.environment.phpVersion`, `phpsab.executablePathCS`, `phpstan.enabled`.
+- **Reporting pattern for PHP IDE findings:** quote the profile file path + profile `myName` value, list the enabled external-tool wirings with their referenced config files, and for each one state its enforcement status: CI-enforced / IDE-enforced / configured-but-dead. Finish with: *"These inspections run at the IDE level only — they depend on contributors using PhpStorm, and none of them gate merges because no CI is present."* (Adjust the last clause if CI does exist.)
+
 ---
 
 ## C# / .NET
@@ -184,6 +228,11 @@ If a language is absent from this file, fall back to general principles from `di
 - `dotnet format` in CI.
 - Analyzers: `.NET analyzers`, `Roslynator`, `StyleCop`.
 - Tests: xUnit + `WebApplicationFactory` for integration tests.
+
+**IDE-level enforcement (probe these):**
+- `.editorconfig` — the canonical .NET rule-severity surface. Grep for `dotnet_diagnostic.<ID>.severity` lines; those are per-analyzer overrides (e.g. `dotnet_diagnostic.CA1304.severity = warning`). Count how many rules are raised to `error` / `warning` vs suppressed.
+- `Directory.Build.props` — `<TreatWarningsAsErrors>true</TreatWarningsAsErrors>`, `<EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>` push analyzer findings into the build itself (weaker than CI but stronger than IDE-only).
+- `.idea/.idea.<sln>/.idea/inspectionProfiles/*.xml` (JetBrains Rider) and `*.DotSettings` (ReSharper-compatible solution settings) — look for `InspectionSeverity` entries and which are raised to `ERROR`.
 
 ---
 

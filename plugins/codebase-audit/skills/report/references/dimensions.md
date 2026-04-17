@@ -131,6 +131,10 @@ If you find anything that could be a real secret, redact it in the report (`<RED
 - Real DB vs mocks: grep for `docker compose` / `testcontainers` / `postgres` in `conftest.py` / `jest.setup.ts` / CI workflow.
 - Coverage: if the stats script found a coverage artifact, read it.
 - CI gates: list what runs in `.github/workflows/*.yml` (or `.circleci/config.yml`, `.gitlab-ci.yml`). Lint, type check, dead-export detection, tests, build.
+- **IDE-committed static analysis profiles:** look for `.idea/inspectionProfiles/*.xml`, `.vscode/settings.json`, `.vscode/extensions.json`, `.editorconfig` (cross-reference `references/languages.md` for per-language signals). When present, read the profile and list which inspections are `enabled="true"` and which external tools they wire up (PHPStan, Psalm, PHP-CS, PHPMD, ESLint, mypy, ruff, rubocop, SpotBugs, etc.). For every external tool named by the profile, cross-reference against: (a) whether its config file exists at the project root (`phpstan.neon`, `psalm.xml`, `.eslintrc*`, `mypy.ini`, `.rubocop.yml`), (b) whether CI also runs it. Report each tool in one of three states:
+  - **CI-enforced** — tool runs on PR, blocks merge. Strongest.
+  - **IDE-enforced** — tool runs in the editor only. Weaker: depends on every contributor using that specific IDE, doesn't gate merges or outside contributions, runs manually rather than automatically.
+  - **Configured but dead** — tool config file exists on disk but neither CI nor the IDE profile activates it (e.g. `phpstan.neon.dist` committed, but `PhpStanGlobal enabled="false"` in the JetBrains profile and no CI step runs `vendor/bin/phpstan`). This is the most misleading state — the repo *looks* covered but nothing enforces the rules.
 - Migration discipline (if DB): count migrations, spot-check that `downgrade()` is non-trivial and destructive transitions carry explicit casts.
 
 **Pushes grade up:**
@@ -138,12 +142,15 @@ If you find anything that could be a real secret, redact it in the report (`<RED
 - Integration tests run against real DB (or a container) in CI.
 - Multi-gate CI (lint + type check + dead-export + tests).
 - Migrations have working downgrades.
+- Committed IDE inspection profile that actively enforces multiple classes of rules (style + security-advisory + debug-leak + dead-code), *in addition to* CI gates.
 
 **Pushes grade down:**
 - Test LOC < 10% of code LOC for production systems.
 - Only mocks, no integration path.
 - No type checker in CI for a project in a type-checkable language.
 - Migrations without downgrade or with empty downgrade.
+- Tool config file present (`phpstan.neon`, `psalm.xml`, `.eslintrc`, `mypy.ini`, `.rubocop.yml`) but no enforcement path — neither CI nor the committed IDE profile activates it. Worse than not having the config, because it gives a false signal of coverage.
+- IDE inspection profile is the *only* quality gate (no CI), especially on codebases with external contributors or multi-editor teams. IDE-only enforcement doesn't scale past the team that sits in that specific IDE, and runs manually rather than gating merges. Credit the dev-time enforcement, but still flag the CI gap.
 
 ---
 

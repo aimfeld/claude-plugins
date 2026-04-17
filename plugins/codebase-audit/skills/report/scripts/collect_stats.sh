@@ -287,6 +287,26 @@ for f in .github/dependabot.yml .github/dependabot.yaml renovate.json .renovater
   fi
 done
 
+log ""
+log "IDE-committed static analysis / editor config (read these for dimension 6):"
+IDE_HIT=0
+shopt -s nullglob
+for match in "${REPO}"/.idea/inspectionProfiles/*.xml \
+             "${REPO}"/.vscode/settings.json \
+             "${REPO}"/.vscode/extensions.json \
+             "${REPO}"/.editorconfig; do
+  if [[ -e "${match}" ]]; then
+    rel="${match#${REPO}/}"
+    lines=$(wc -l < "${match}" 2>/dev/null || echo "?")
+    log "  found: ${rel} (${lines} lines)"
+    IDE_HIT=1
+  fi
+done
+shopt -u nullglob
+if [[ "${IDE_HIT}" = "0" ]]; then
+  log "  (no IDE-committed inspection profile / editor config found — team relies on per-contributor editor defaults)"
+fi
+
 # ----- Done -----
 section "Done"
 log "Full output written to: ${OUT}"
