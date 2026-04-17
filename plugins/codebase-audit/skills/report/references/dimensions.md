@@ -1,6 +1,6 @@
 # Dimensions Reference
 
-For each of the 16 dimensions, this file lists: what to look for, which probes to run, common evidence patterns, and what pushes the grade up or down.
+For each of the 17 dimensions, this file lists: what to look for, which probes to run, common evidence patterns, and what pushes the grade up or down.
 
 Read only the sections for dimensions you're currently assessing. You do not need to load this file upfront.
 
@@ -437,3 +437,62 @@ If no frontend: `— N/A`.
 - Long tests without sharding.
 
 **How to report timing when you can't measure directly:** say so. "Could not run `gh run list` in this environment; workflow structure suggests roughly N minutes based on steps." Being explicit about the limitation is better than inventing a number.
+
+---
+
+## 17. Technical debt & legacy stack
+
+**Question:** Is the tech stack still alive — language runtimes on supported versions, frameworks within reach of latest, load-bearing dependencies still maintained upstream — or is the team accumulating a migration backlog they haven't acknowledged?
+
+This dimension is orthogonal to §14. §14 asks whether the *update process* is wired up (Dependabot, lockfiles, CVE scans). §17 asks what version you are *actually on right now*, and whether the upstream projects you depend on are still alive. A project can have excellent Dependabot automation and still be on Python 3.7 with a pile of archived npm packages. Grade them independently.
+
+**Probes:**
+- **Primary language runtime version** vs the language's current support window:
+  - Python: `requires-python` in `pyproject.toml`, `python_requires` in `setup.py`, `.python-version`, `runtime.txt`. Compare to the CPython support matrix (`3.9` is the current floor as of writing; anything older is EOL).
+  - Node: `engines.node` in `package.json`, `.nvmrc`, `.node-version`, CI setup-node version. Compare to the active LTS line (Node 20 / 22 are active; 18 and below are EOL or entering EOL).
+  - Go: `go` directive in `go.mod`. Go supports the last two minors only.
+  - Ruby: `.ruby-version`, `Gemfile`'s `ruby` directive.
+  - Java / Kotlin: JDK version in `build.gradle` / `pom.xml`. Compare to current LTS (21, 17).
+  - .NET: `TargetFramework` in `*.csproj`. Compare to .NET current LTS.
+  - PHP: `require.php` in `composer.json`. Compare to supported PHP branches.
+  - Rust: `rust-toolchain` / `rust-toolchain.toml`. Rust's MSRV policy is looser — "at least six months old" is fine.
+- **Framework major versions** vs latest major release. Cross-reference `package.json`, `pyproject.toml`, `Gemfile`, `composer.json`, `pom.xml`, etc. against the current major — React (19), Next.js (15), Angular, Vue (3), Django (5), FastAPI, Flask (3), Spring Boot (3), Rails (7/8), Laravel (11), Symfony (7), Express (5), .NET (9). Two-plus majors behind is a finding.
+- **Datastore / infra majors** from Docker / compose / README: PostgreSQL, MySQL, Redis, Elasticsearch / OpenSearch. Check against upstream supported-versions pages.
+- **Legacy-technology exposure.** Anything load-bearing in a technology the rest of the industry has moved off: AngularJS 1.x, CoffeeScript, Backbone, Ember pre-3, jQuery in a modern SPA codebase, moment.js, class components in an otherwise-hooks React codebase, Python 2 compat shims, Flow types alongside (or instead of) TypeScript.
+- **Dependency maintenance status** — is every direct dependency's upstream still alive? For 30+ direct deps, per-dep lookups aren't tractable — lean on **bulk ecosystem signals** instead of maintaining a curated list:
+  - **Registry deprecation warnings** — one command per ecosystem, authoritative. Node: `npm outdated` + `npm ls` surface packages the maintainer flagged deprecated. Python: `pip-audit` + `pip list --outdated`. Rust: `cargo outdated`. Go: `go list -m -u all`. Ruby: `bundle outdated`. PHP: `composer outdated --direct`.
+  - **Last-release age.** The same `outdated` commands plus `npm view <pkg> time` / `pip index versions <pkg>` give last-publish dates. Flag any direct dep with no release in > 18 months.
+  - **PyPI `Development Status` classifier.** Machine-readable from package metadata; `Development Status :: 7 - Inactive` is an explicit abandonment signal.
+  - **GitHub `archived: true`.** Authoritative per-repo flag. For suspicious deps surfaced by the steps above, `gh api repos/{owner}/{repo} --jq .archived` settles it in one call.
+  - **Lockfile staleness.** If the lockfile churns frequently but a specific dep's resolved version hasn't moved in 3+ years (`git log -p -- package-lock.json | grep <pkg>`), the upstream has likely stalled.
+  - **Known-orphan examples, for calibration only** (not a checklist — verify with the signals above): `request` → `undici`; `moment` → `date-fns` / `Temporal`; `node-sass` → `sass`; `tslint` → `eslint`; `enzyme` → `@testing-library/react`; `bower`, `gulp` in many SPA contexts.
+
+  Flag each unmaintained load-bearing dep individually with last-release date and canonical successor where one exists. Security-sensitive unmaintained deps (HTTP clients, crypto, auth) are heavier findings than benign ones (a logging helper).
+- **Deprecated APIs in active use.** `componentWillMount` / `componentWillReceiveProps`, legacy React context, `PropTypes` on new components, Python 2 compat imports, `asyncio.get_event_loop()` in 3.12+ code, Django `url()` instead of `path()`, Rails `before_filter`, etc.
+- **Build tooling currency.** webpack 4 vs 5 / Vite / Turbopack; Babel 6 vs 7; setuptools-only vs uv / poetry / hatch; plain `npm` vs `pnpm` / `yarn` for large monorepos; Make vs Bazel / Nx where complexity demands it.
+- **Blocked-upgrade signals.** Grep the repo for comments like `# do not bump`, `// locked to 4.x`, `# can't upgrade because`, TODOs referencing a stuck dep, issues labeled `upgrade-blocker`. These are the debt the team already knows about.
+
+**Pushes grade up:**
+- All runtimes on active LTS / actively supported versions.
+- Frameworks within one major of latest, or on the latest LTS for frameworks that ship LTS lines.
+- No load-bearing legacy technology.
+- Every direct dependency released within the last ~12 months (or has a clear long-term-stable signal, e.g., `lodash` — mature, stable, still maintained).
+- Documented upgrade intent in CHANGELOG / README / issues — even as TODOs — showing the team tracks major versions.
+
+**Pushes grade down:**
+- Language runtime EOL or entering EOL in < 12 months (Python < 3.9, Node ≤ 18 post-EOL, PHP < 8.2, Go more than two minors behind, .NET on a non-LTS past its support window).
+- A major framework two or more majors behind (React 16 with 19 out, Angular 1.x, Django 3.x with 5 out, Rails 5.x, Laravel 7).
+- Load-bearing legacy technology with no migration plan (AngularJS, CoffeeScript, Flash, Silverlight).
+- Direct dependencies whose upstream is archived / unmaintained / last-released > 18 months ago, with no migration plan — especially security-sensitive ones.
+- Pinned-forever dependencies with `# do not bump` and no replacement plan.
+- Deprecated APIs mixed into *new* code (old patterns added in the last 90 days).
+
+**Calibration:**
+- **A** — everything current, no legacy corners, every direct dep actively maintained.
+- **A−** — one acknowledged outlier with a migration plan (e.g., "one AngularJS admin page, ticket #234 to rewrite in React").
+- **B** — a couple of majors behind on a framework or two, all runtimes still supported, no archived deps.
+- **C** — runtime approaching EOL, or one archived security-sensitive dep still in use, or a load-bearing legacy area with no plan.
+- **D** — runtime already EOL, or multiple archived deps, or AngularJS 1.x still load-bearing with no migration.
+- **F** — stack is effectively unmaintainable; a new hire would need to learn an obsolete language or framework to contribute.
+
+If the project is brand-new (initial commit < 6 months ago) and everything is current, grade A on the state *now* but note that §17 will need re-evaluation annually — this dimension drifts on its own.

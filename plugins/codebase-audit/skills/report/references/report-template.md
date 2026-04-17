@@ -59,6 +59,7 @@ If any row is `Not measured` or approximate, say why in the Notes column. Do not
 | Dependency management | **{grade}** | {one line — "Dependabot active" or "No automation detected"} |
 | Frontend bundle / perf | **{grade or `— N/A`}** | {one line or N/A reason} |
 | CI/CD execution speed | **{grade}** | {one line — include observed duration if measurable} |
+| Technical debt / legacy stack | **{grade}** | {one line — e.g., "Python 3.12, Node 20 LTS, React 19, no archived deps" or "Python 3.8 EOL; Django 3.2 two majors behind; `request` (archived) still in use"} |
 
 **Bottom line:** {3-5 sentences. Lead with the overall verdict (production-grade / healthy with gaps / needs work before launch). Name 1-2 standout strengths. Name the top 1-2 weakest dimensions. Close with "remaining work is [refinement / rescue / closing a specific gap]".}
 
@@ -179,6 +180,16 @@ If no frontend exists: `— N/A: backend-only service`.
 - **Matrix / sharding:** {tests split across jobs?}
 - **Deploy automation:** {manual `workflow_dispatch` / auto on push / tagged releases only}
 
+### 4.17 Technical debt and legacy stack
+
+- **Language runtime versions:** {e.g., "Python 3.12 (`requires-python = ">=3.12"` in `pyproject.toml`), Node 20 LTS (`engines.node = ">=20"` in `package.json`)" — or flag: "Python 3.8 (`.python-version:1`) — EOL October 2024"}
+- **Framework majors vs latest:** {e.g., "React 19, Next.js 15, FastAPI latest" — or flag: "React 16 (two majors behind current 19); Django 3.2 (two LTS lines behind)"}
+- **Legacy-technology exposure:** {list anything load-bearing in a legacy tech — AngularJS, CoffeeScript, jQuery in a modern SPA, moment.js, class components in a hooks codebase — or "None detected"}
+- **Dependency maintenance status:** {name the bulk check you ran (`npm outdated` + `npm ls` for Node, `pip list --outdated` + `pip-audit` for Python, `cargo outdated`, `bundle outdated`, `composer outdated --direct`, `go list -m -u all`) and summarize what it surfaced. List any direct dep that is registry-deprecated, archived on GitHub (`archived: true`), classified PyPI `Development Status :: 7 - Inactive`, or last-released > 18 months ago — with canonical successor where one exists, e.g., "`request` (archived 2020 → `undici`)", "`moment` (maintenance-only → `date-fns` / `Temporal`)". "No unmaintained direct dependencies detected via `npm outdated` + archive spot-check" if clean.}
+- **Deprecated APIs in use:** {e.g., `componentWillMount`, `asyncio.get_event_loop()` in 3.12+, Django `url()`, Rails `before_filter` — or "None in new code"}
+- **Build tooling currency:** {e.g., "Vite 5, uv, pnpm" — or flag: "webpack 4 (webpack 5 has been out since 2020)"}
+- **Blocked upgrades:** {grep for `# do not bump`, `// locked to`, upgrade-blocker TODOs; list each with the reason if stated}
+
 ---
 
 ## 5. Substantial Problems Worth Addressing
@@ -232,7 +243,7 @@ N+1. ...
 
 - The **Summary Stats** table (§1) is new — older reports didn't have it. Always include it, even when numbers are approximate. Mark approximations in the Notes column.
 - The **Disaster Recovery & Backups subsection** (§3) is mandatory. If you cannot find evidence of a backup strategy, say so explicitly — do not omit the subsection.
-- The **dimension grade table** (§2) must include all 16 dimensions, including the newer ones (12-16). Use `— N/A` with a reason for rows that don't apply to this project type.
+- The **dimension grade table** (§2) must include all 17 dimensions, including the newer ones (12-17). Use `— N/A` with a reason for rows that don't apply to this project type.
 - When a dimension is listed in the executive summary table, it must have a corresponding subsection in §4. Do not grade something in §2 and then skip it in §4.
 - Section 5 items should be actionable. "Improve observability" is not actionable; "Add `sentry_sdk.set_context()` at the top of the 4 long-running service entry points, ≈ 1 hour" is.
 - Section 7's medium-term bucket should mention Dependabot / Renovate explicitly if the project lacks automated dependency updates.

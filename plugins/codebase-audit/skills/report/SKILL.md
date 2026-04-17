@@ -1,6 +1,6 @@
 ---
 name: report
-description: Produce a thorough software quality assessment report for a git repository — covering code architecture, security, database design, observability, testing, frontend quality, deployment, disaster recovery, data privacy (GDPR), dependency management, frontend bundle performance, and CI/CD execution speed, plus summary stats (LOC, test LOC, test coverage, commit activity). Use this skill whenever the user asks for a "quality report", "quality assessment", "code audit", "codebase review", "technical due diligence", "production readiness review", "health check", "grade my codebase", or anything along the lines of "how good is this project", "what are the weak spots", "is this safe to deploy", or "assess/audit this repo". Works on any git repo regardless of primary language (Python, TypeScript/JavaScript, Go, Rust, Java, Ruby, PHP, C#, etc.). Writes the report to `reports/{project}_quality_assessment_{YYYY-MM-DD}.md`.
+description: Produce a thorough software quality assessment report for a git repository — covering code architecture, security, database design, observability, testing, frontend quality, deployment, disaster recovery, data privacy (GDPR), dependency management, frontend bundle performance, CI/CD execution speed, and technical debt / legacy-stack currency, plus summary stats (LOC, test LOC, test coverage, commit activity). Use this skill whenever the user asks for a "quality report", "quality assessment", "code audit", "codebase review", "technical due diligence", "production readiness review", "health check", "grade my codebase", or anything along the lines of "how good is this project", "what are the weak spots", "is this safe to deploy", or "assess/audit this repo". Works on any git repo regardless of primary language (Python, TypeScript/JavaScript, Go, Rust, Java, Ruby, PHP, C#, etc.). Writes the report to `reports/{project}_quality_assessment_{YYYY-MM-DD}.md`.
 ---
 
 # Quality Assessment
@@ -101,8 +101,9 @@ At the end of your turn, tell the user:
 14. **Dependency management & supply chain** — Dependabot / Renovate configured, lockfiles committed and verified in CI, `npm audit` / `pip-audit` / equivalent, pinned base images in Dockerfile
 15. **Frontend bundle & performance** *(if a frontend exists)* — production bundle size, code splitting / lazy loading of heavy libs, tree-shaking, source-map discipline, Lighthouse-class red flags
 16. **CI/CD execution speed** — workflow duration, test parallelization (`pytest-xdist`, `vitest --shard`, `go test -parallel`), caching of deps/build artifacts, deploy automation
+17. **Technical debt & legacy stack** — language-runtime currency vs active support windows, framework major-version distance from latest, legacy-language/framework exposure (AngularJS, CoffeeScript, class components in a hooks codebase), upstream maintenance status of direct dependencies (archived / orphaned / last-release staleness), deprecated-API usage, blocked-upgrade signals
 
-Dimensions 12-16 are the ones most commonly missed in ad-hoc code reviews. Treat them as first-class and always include them in the report, even when the answer is "not applicable" (e.g. no frontend → say so in the frontend bundle row).
+Dimensions 12-17 are the ones most commonly missed in ad-hoc code reviews. Treat them as first-class and always include them in the report, even when the answer is "not applicable" (e.g. no frontend → say so in the frontend bundle row).
 
 ## Grading rubric
 
@@ -131,7 +132,7 @@ Full template: `references/report-template.md`. At a high level:
 
 1. **Header table** — date, scope, author, generation method
 2. **Summary Stats** *(new)* — LOC, comment LOC, test LOC, test/code ratio, test coverage, commits in last 90 days, active contributors, primary languages
-3. **Executive Summary** — grade table across all 16 dimensions, plus a 3-4 sentence "bottom line"
+3. **Executive Summary** — grade table across all 17 dimensions, plus a 3-4 sentence "bottom line"
 4. **What the app does — Operational Picture** — numbered data-flow walkthrough, including a "Disaster Recovery & Backups" subsection
 5. **Code Quality Findings** — one subsection per dimension with concrete evidence
 6. **Substantial Problems Worth Addressing** — concrete, numbered, with effort estimates
