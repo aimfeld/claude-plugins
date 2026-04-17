@@ -6,8 +6,8 @@
     "name": "Adrian Imfeld",
     "email": "aimfeld80@gmail.com"
   },
-  "homepage": "https://github.com/aimfeld/codebase-audit",
-  "repository": "https://github.com/aimfeld/codebase-audit",
+  "homepage": "https://github.com/aimfeld/claude-plugins/tree/main/plugins/codebase-audit",
+  "repository": "https://github.com/aimfeld/claude-plugins",
   "license": "MIT",
   "keywords": [
     "quality",
