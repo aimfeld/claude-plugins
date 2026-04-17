@@ -9,7 +9,7 @@ Every grade and finding is backed by a concrete `file:line` pointer so a reviewe
 A single Markdown report (~3–6 pages) written to `reports/{project}_quality_assessment_{YYYY-MM-DD}.md`:
 
 - **Summary stats** — LOC, test LOC, test/code ratio, coverage, commits in last 90 days, active contributors, primary languages
-- **Executive summary** — graded table across 16 dimensions, with a 3–4 sentence bottom line
+- **Executive summary** — graded table across 17 dimensions, with a 3–4 sentence bottom line
 - **Operational picture** — numbered data-flow walkthrough (how the system actually runs)
 - **Per-dimension findings** — each with `file:line` evidence
 - **Substantial problems** — numbered, with effort estimates
@@ -64,6 +64,7 @@ A full sample assessment of a production open-source codebase lives at [`example
 14. Dependency management & supply chain
 15. Frontend bundle & performance
 16. CI/CD execution speed
+17. Technical debt & legacy stack
 
 Grades on a standard A–F scale with `+`/`−` half-steps. Dimensions without enough evidence are marked `—` rather than guessed.
 
@@ -94,7 +95,7 @@ Claude will:
 1. Orient on the project (README, manifests, deploy shape)
 2. Run the stats collector (LOC, coverage artifacts, git activity, CI timing)
 3. Survey operational context (entrypoints, migrations, config, deploy)
-4. Probe each of the 16 dimensions with targeted greps and reads
+4. Probe each of the 17 dimensions with targeted greps and reads
 5. Write the graded report to `reports/`
 
 Typical run: 5–15 minutes on a medium-sized repo.
