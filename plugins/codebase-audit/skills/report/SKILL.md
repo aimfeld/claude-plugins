@@ -90,7 +90,7 @@ At the end of your turn, tell the user:
 3. **Error handling & observability** — Sentry/equivalent coverage, retry patterns, structured logging, metrics
 4. **Secrets & configuration** — no hardcoded secrets, env-based config, no `.env` checked in
 5. **Code smells** — magic numbers, TODO/FIXME, commented-out blocks, dead code
-6. **Maintainability & tests** — test framework, real-DB vs mocks, test LOC ratio, test coverage %, CI gates (lint, type check, dead exports)
+6. **Maintainability & tests** — test framework, real-DB vs mocks, test LOC ratio, test coverage %, CI gates (lint, type check, dead exports), **and IDE-committed inspection profiles (`.idea/inspectionProfiles/*.xml`, `.vscode/settings.json`, `.editorconfig`) as a weaker-but-real enforcement layer when CI is thin or absent**
 7. **Security** — auth dependencies, CSRF/OAuth state, ORM-only vs raw SQL, CORS, sensitive-PII flags, known CVEs patched, input validation
 8. **Database design** — FK constraints enforced at the **DB layer via migrations** (preferred) *or* ORM annotations — check migrations first before flagging ORM-only gaps; unique/natural-key constraints, deliberate column types, index strategy, migration rollback coverage
 9. **Frontend quality** — strict TS, theme token centralization, accessibility attributes (`aria-label`, semantic HTML), dead-export detection
