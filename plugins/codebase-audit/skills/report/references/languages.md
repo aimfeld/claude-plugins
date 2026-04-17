@@ -165,6 +165,12 @@ If a language is absent from this file, fall back to general principles from `di
 **Probes:**
 - Raw SQL injection: `mysqli_query` with concat. PDO with prepared statements is idiomatic.
 - Laravel: mass assignment (`$fillable`), eager-loading (`->with()`) to avoid N+1.
+- **Doctrine schema enforcement (read alongside dimensions §8):** Doctrine has two distinct "cascade" concepts. Do not conflate them:
+  - `@ORM\JoinColumn(onDelete="CASCADE")` — emits a DB-level `ON DELETE CASCADE` when schema is generated from annotations via `doctrine:schema:update`. Enforced by the DB.
+  - `cascade={"remove"}` on the association — ORM-level; runs only when `EntityManager::remove()` is called. Bypassed by raw SQL, DQL `DELETE`, and bulk updates.
+  - **Many Doctrine projects use phinx / Doctrine Migrations with hand-written migration code as the source of schema truth**, and deliberately omit `onDelete` from the `@ORM\JoinColumn` annotations because the migration file already defines the FK with `ON DELETE CASCADE` at the DB level. In those projects, flagging absent `@ORM\JoinColumn(onDelete=...)` as a schema gap is a false positive — the integrity constraint lives in the migration, which is stronger.
+  - **Probe order:** first grep the migrations directory (`migrations/`, `db/migrate/`, `src/Migrations/`) for `ON DELETE`, `addForeignKey`, `->foreignKey(`, `CONSTRAINT ... FOREIGN KEY ... ON DELETE`. Only then check `@ORM\JoinColumn` / `#[ORM\JoinColumn]`. Report based on the stronger of the two.
+- **Laminas/Symfony/Laravel migration file globs:** phinx → `db/migrations/*.php` with `up()`/`change()`; Doctrine Migrations → `src/Migrations/Version*.php` with `up(Schema $schema)`; Laravel → `database/migrations/*.php` with `Schema::table(...)->foreign(...)->onDelete('cascade')`.
 
 ---
 
