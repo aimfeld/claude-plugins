@@ -75,6 +75,16 @@ Grades on a standard A–F scale with `+`/`−` half-steps. Dimensions without e
 /plugin install codebase-audit@aimfeld
 ```
 
+## Updating
+
+Claude Code refreshes marketplaces automatically at startup, so new versions are usually picked up next time you launch it. To pull the latest version on demand, run:
+
+```
+/plugin marketplace update aimfeld
+```
+
+See [CHANGELOG.md](./CHANGELOG.md) for what's in each release.
+
 ## Use
 
 This skill is model-invoked — just ask naturally:
