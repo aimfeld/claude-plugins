@@ -1,0 +1,19 @@
+{
+  "name": "codebase-audit",
+  "description": "Produces a thorough software quality assessment report for a git repository — architecture, security, database design, observability, testing, DR, GDPR, dependencies, frontend bundle, and CI/CD speed. Evidence-based grading with file:line citations.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Adrian Imfeld",
+    "email": "aimfeld80@gmail.com"
+  },
+  "homepage": "https://github.com/aimfeld/codebase-audit",
+  "repository": "https://github.com/aimfeld/codebase-audit",
+  "license": "MIT",
+  "keywords": [
+    "quality",
+    "audit",
+    "code-review",
+    "due-diligence",
+    "production-readiness"
+  ]
+}

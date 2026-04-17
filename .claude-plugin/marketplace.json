@@ -1,0 +1,19 @@
+{
+  "name": "aimfeld",
+  "owner": {
+    "name": "Adrian Imfeld",
+    "email": "aimfeld80@gmail.com"
+  },
+  "metadata": {
+    "description": "Adrian's Claude Code plugins"
+  },
+  "plugins": [
+    {
+      "name": "codebase-audit",
+      "source": "./plugins/codebase-audit",
+      "description": "Produces a thorough software quality assessment report for a git repository — architecture, security, database design, observability, testing, DR, GDPR, dependencies, frontend bundle, and CI/CD speed.",
+      "category": "code-review",
+      "tags": ["audit", "quality", "due-diligence"]
+    }
+  ]
+}
