@@ -92,12 +92,12 @@ At the end of your turn, tell the user:
 5. **Code smells** — magic numbers, TODO/FIXME, commented-out blocks, dead code
 6. **Maintainability & tests** — test framework, real-DB vs mocks, test LOC ratio, test coverage %, CI gates (lint, type check, dead exports)
 7. **Security** — auth dependencies, CSRF/OAuth state, ORM-only vs raw SQL, CORS, sensitive-PII flags, known CVEs patched, input validation
-8. **Database design** — foreign keys with `ondelete`, unique/natural-key constraints, deliberate column types, index strategy, migration rollback coverage
+8. **Database design** — FK constraints enforced at the **DB layer via migrations** (preferred) *or* ORM annotations — check migrations first before flagging ORM-only gaps; unique/natural-key constraints, deliberate column types, index strategy, migration rollback coverage
 9. **Frontend quality** — strict TS, theme token centralization, accessibility attributes (`aria-label`, semantic HTML), dead-export detection
 10. **Observability** — logging format, request correlation, Sentry `before_send` fingerprinting, slow-query logs, metrics endpoints
 11. **Performance** — N+1 patterns, async correctness, blocking I/O in async paths, batching, OOM mitigations
 12. **Disaster recovery & backups** *(critical for production deployments)* — scheduled DB backups, offsite storage, restore documentation, PITR / WAL archiving, tested restore
-13. **Data privacy & GDPR/FADP** *(critical if storing PII or third-party data)* — account deletion endpoint, data export, consent flows, privacy policy link, `ondelete=CASCADE` actually wired to an API action
+13. **Data privacy & GDPR/FADP** *(critical if storing PII or third-party data)* — account deletion endpoint, data export, consent flows, privacy policy link, erasure path actually reaches every user-owned table (via DB cascade, ORM cascade, *or* application-code purge — any one is acceptable)
 14. **Dependency management & supply chain** — Dependabot / Renovate configured, lockfiles committed and verified in CI, `npm audit` / `pip-audit` / equivalent, pinned base images in Dockerfile
 15. **Frontend bundle & performance** *(if a frontend exists)* — production bundle size, code splitting / lazy loading of heavy libs, tree-shaking, source-map discipline, Lighthouse-class red flags
 16. **CI/CD execution speed** — workflow duration, test parallelization (`pytest-xdist`, `vitest --shard`, `go test -parallel`), caching of deps/build artifacts, deploy automation

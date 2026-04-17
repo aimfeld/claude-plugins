@@ -182,23 +182,28 @@ If you find anything that could be a real secret, redact it in the report (`<RED
 **Question:** Is the schema designed to prevent bad data or to accept it and hope?
 
 **Probes:**
-- Read every model file or migration. Check:
-  - Every FK column uses `ForeignKey(..., ondelete=...)`. No bare integer columns as implicit references.
+- **Where are FK constraints actually enforced — DB or ORM?** Check *both* layers before concluding the schema is lax. The DB layer is the source of truth:
+  - **DB-level first** — read migration files (Alembic, phinx, Flyway, Liquibase, Rails, Prisma, Knex, goose, Django migrations) and any `schema.sql` / `structure.sql` / `*.dbml`. Grep for `FOREIGN KEY`, `REFERENCES`, `ON DELETE CASCADE|SET NULL|RESTRICT|NO ACTION`, `addForeignKey`, `->foreign()`, `references:`, `onDelete:`. If the migrations define FK constraints with explicit `ON DELETE` rules, the schema enforces integrity regardless of how data is modified (raw SQL, admin tools, bulk jobs) — that is the *stronger* guarantee.
+  - **ORM-level second** — only *after* establishing what the DB enforces, look at ORM annotations: SQLAlchemy `ForeignKey(..., ondelete=...)`, Doctrine `@ORM\JoinColumn(onDelete=...)` / `#[ORM\JoinColumn(onDelete: ...)]`, Django `on_delete=`, Prisma `onDelete:`, GORM `constraint:OnDelete:`, Rails `foreign_key: { on_delete: }`. ORM cascades (`cascade={"remove"}`, `cascade_delete=True`) run only when deletion goes through the ORM — they are bypassed by raw SQL, bulk-deletes, and admin tooling.
+  - **Do not flag missing ORM-level `onDelete` as a schema gap if the DB-level migration already enforces the constraint.** That is a false positive — the ORM annotation is then merely a hint for the ORM's own unit-of-work, not the integrity boundary. Report the DB-level enforcement as the finding.
+  - **Do flag as a gap** when neither layer enforces the constraint (no `ON DELETE` in migrations *and* no `onDelete=` in ORM *and* only application-code cleanup) — that is the genuinely risky case.
+- Check the other schema-quality dimensions:
   - Natural-key `UniqueConstraint` on tables where business rules require uniqueness (e.g., `(user_id, external_id)`).
   - Column types chosen deliberately: `SmallInteger` for bounded ranges, `BigInteger` for IDs that will grow, `DECIMAL` for money (not `FLOAT`), `TIMESTAMP WITH TIME ZONE` not naive.
   - Index strategy on hot paths. Partial indexes for nullable columns. Covering indexes for known aggregations.
-- Count migrations; confirm each has a `downgrade()` that is non-trivial when the upgrade was destructive (e.g., enum conversion must reverse).
+- Count migrations; confirm each has a `downgrade()` that is non-trivial when the upgrade was destructive (e.g., enum conversion must reverse). Forward-only migration practice (no `down()`) is a deliberate trade-off, not automatically a downgrade to the grade — note it as a trade-off with rollback implications.
 
 **Pushes grade up:**
-- Mandatory FKs with explicit `ondelete` on every relationship.
+- FK constraints enforced **at the DB level** via migrations, with explicit `ON DELETE` rules on every relationship. (Stronger than ORM-only.)
 - Partial / covering indexes justified by query patterns.
-- Migration downgrades exist and are non-trivial.
+- Migration downgrades exist and are non-trivial (or forward-only is deliberate with a documented rollback plan).
 
 **Pushes grade down:**
-- Bare integer columns referencing another table.
+- Bare integer columns referencing another table with **no** FK constraint at either the DB or ORM layer.
+- `ON DELETE` rules absent **in both** migrations *and* ORM annotations, with cleanup delegated entirely to application code.
 - No unique constraints where business rules require them.
 - `FLOAT` for money. `TIMESTAMP` without TZ.
-- Empty or TODO downgrades.
+- Empty or TODO downgrades in a project that explicitly practices rollback.
 - Missing indexes on obvious hot-path columns.
 
 If the project has no database, mark `— N/A`.
@@ -315,7 +320,12 @@ For small side projects with no real users, this can still be B or C with a note
 
 **Probes:**
 - Grep for `delete_account`, `deleteAccount`, `DELETE /users/me`, `DELETE /account`, `hard_delete`, `anonymize`.
-- Check whether the `ondelete=CASCADE` FKs on the `users` table are actually reachable via an API route. A CASCADE in the schema that no endpoint calls is not GDPR-compliant.
+- **Confirm the erasure path actually removes every user-owned row.** There are three valid designs and they must be evaluated differently — do not assume ORM-level cascade is the only "correct" answer:
+  1. **DB-level `ON DELETE CASCADE`** defined in migrations — strongest, runs regardless of how the delete is issued.
+  2. **ORM-level cascade** (`cascade={"remove"}`, `cascade_delete=True`, Django `on_delete=CASCADE`) — works only when deletion goes through the ORM; bypassed by raw SQL.
+  3. **Application-code purge** (a `PurgeUserData` service that walks tables explicitly) — works if every user-FK table is covered; audit the service against the schema to verify no orphans.
+  Any one of the three is acceptable for GDPR; flag a gap only when none of them covers a given user-FK table. Cross-reference with §8 findings — if §8 already established DB-level FKs exist with `ON DELETE CASCADE`, do not re-raise it here as a gap.
+- **Also verify the erasure path is reachable** — a CASCADE in the schema that no endpoint/CLI/admin action calls is not GDPR-compliant. Trace from the `DELETE` endpoint (or CLI command) to confirm it actually triggers the cascade/purge.
 - Data export: `GET /users/me/export`, `data_export.*`, right-to-data-portability.
 - Consent: signup flow mentions terms/privacy?
 - Privacy policy link on the site / in README?
@@ -323,13 +333,14 @@ For small side projects with no real users, this can still be B or C with a note
 - `send_default_pii=False` on Sentry or equivalent.
 
 **Pushes grade up:**
-- Working `DELETE` endpoint that cascades through all user-owned tables.
+- Working `DELETE` endpoint (or self-service form) that reaches every user-owned table via DB cascade, ORM cascade, or an audited purge service — all three are acceptable.
 - Data-export endpoint.
 - Privacy policy link.
 - No PII in logs / Sentry.
 
 **Pushes grade down:**
 - No account-deletion endpoint at all (even if schema would cascade).
+- User-owned tables that no cascade mechanism (DB, ORM, or application code) covers — orphans guaranteed on deletion.
 - Third-party imported data with no explicit purge logic.
 - PII leaking into logs / Sentry.
 
