@@ -18,7 +18,7 @@ A single Markdown report (~3–6 pages) written to `reports/{project}_quality_as
 
 ## Example report
 
-A full sample assessment of a production open-source codebase lives at [`../../examples/flawchess_quality_assessment_2026-04-17.md`](../../examples/flawchess_quality_assessment_2026-04-17.md). A taste:
+A full sample assessment of a production open-source codebase lives at [`examples/flawchess_quality_assessment_2026-04-17.md`](./examples/flawchess_quality_assessment_2026-04-17.md). A taste:
 
 ### Summary stats (excerpt)
 
@@ -44,7 +44,7 @@ A full sample assessment of a production open-source codebase lives at [`../../e
 
 > **Bottom line.** FlawChess is a production-grade codebase on every axis relating to code craft: layering, DB design, type discipline, test coverage, Sentry wiring, and security fundamentals are all A-tier. The main finding a reviewer would flag is **no automated dependency updates and no vulnerability scanning in CI** — an unusual gap for a project otherwise this disciplined. Remaining work is closing those gaps, not rewriting anything.
 
-[Read the full report →](../../examples/flawchess_quality_assessment_2026-04-17.md)
+[Read the full report →](./examples/flawchess_quality_assessment_2026-04-17.md)
 
 ## Dimensions graded
 

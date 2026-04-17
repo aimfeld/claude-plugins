@@ -22,7 +22,7 @@ Then install any plugin from it:
 
 Produces a thorough, evidence-based software quality assessment for any git repository — architecture, security, database design, observability, testing, disaster recovery, GDPR, dependency management, frontend bundle, and CI/CD speed. Every grade is backed by a concrete `file:line` pointer.
 
-See [`examples/`](./examples) for a sample report.
+See [`plugins/codebase-audit/examples/`](./plugins/codebase-audit/examples) for a sample report.
 
 ```
 /plugin install codebase-audit@aimfeld
