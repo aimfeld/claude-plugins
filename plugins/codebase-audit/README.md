@@ -77,13 +77,23 @@ Grades on a standard A–F scale with `+`/`−` half-steps. Dimensions without e
 
 ## Updating
 
-Claude Code refreshes marketplaces automatically at startup, so new versions are usually picked up next time you launch it. To pull the latest version on demand, run:
+Third-party marketplaces have auto-update **disabled by default** in Claude Code — only the official Anthropic marketplace auto-updates out of the box. To receive new versions of this plugin automatically, turn auto-update on once:
+
+1. Run `/plugin`
+2. Go to the **Marketplaces** tab
+3. Select `aimfeld`
+4. Choose **Enable auto-update**
+
+After that, Claude Code will refresh the marketplace at startup and update the plugin. When a plugin changes, you'll be prompted to run `/reload-plugins` to activate the new version.
+
+To update on demand (works whether or not auto-update is on):
 
 ```
 /plugin marketplace update aimfeld
+/reload-plugins
 ```
 
-See [CHANGELOG.md](./CHANGELOG.md) for what's in each release.
+Requires Claude Code ≥ 2.0.70 for native marketplace auto-update. See [CHANGELOG.md](./CHANGELOG.md) for what's in each release.
 
 ## Use
 

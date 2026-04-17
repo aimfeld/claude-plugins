@@ -15,10 +15,14 @@ Paths in `marketplace.json` resolve relative to the marketplace root (the direct
 ## How a release actually reaches users
 
 - Marketplace clients cache by **plugin version**. If two commits share the same `plugin.json` version, Claude Code treats them as identical and skips the update. **Bumping `version` is what publishes a release.** No bump, no propagation.
-- `version` lives in `plugins/<name>/.claude-plugin/plugin.json` only. Do not also set it in the marketplace entry — `plugin.json` silently wins and a split version is a footgun. (The upstream docs suggest putting it in `marketplace.json` for relative-path plugins; in practice `plugin.json`-only works fine and keeps one source of truth.)
-- After the tagged release lands on `main`, users pick it up two ways:
-  - **Auto:** Claude Code runs a background marketplace update at startup.
-  - **Manual:** `/plugin marketplace update aimfeld`.
+- `version` lives in `plugins/<name>/.claude-plugin/plugin.json` only. Do not also set it in the marketplace entry — `plugin.json` silently wins and a split version is a footgun. (From the reference docs: *"If also set in the marketplace entry, `plugin.json` takes priority. You only need to set it in one place."*)
+- **Third-party marketplaces have auto-update OFF by default.** From the docs: *"Official Anthropic marketplaces have auto-update enabled by default. Third-party and local development marketplaces have auto-update disabled by default."* This is a per-user, per-marketplace toggle — there is **no way** for a marketplace author to flip this default for consumers. Users must enable it themselves in `/plugin` → Marketplaces → `aimfeld` → Enable auto-update.
+- After a tagged release lands on `main`, users pick it up in one of three ways:
+  - **Auto-update, opted in:** Claude Code refreshes the marketplace at startup and updates installed plugins. When something actually updated, the user is prompted to run `/reload-plugins`.
+  - **Manual, on demand:** `/plugin marketplace update aimfeld` followed by `/reload-plugins`.
+  - **Fresh install:** `/plugin install codebase-audit@aimfeld` picks up the current version.
+- **Native marketplace auto-update requires Claude Code ≥ 2.0.70.** Older clients can only update manually.
+- **There are known bugs in the update path** (tracked upstream): stale marketplace clones not fast-forwarding, installed plugin not actually reloading after marketplace update, npm-sourced plugins using stale caches, etc. Expect the occasional report of "I ran update but nothing changed" — workaround is usually `rm -rf ~/.claude/plugins/cache/aimfeld && /plugin marketplace update aimfeld` and then a Claude Code restart. See upstream issues [#26744](https://github.com/anthropics/claude-code/issues/26744), [#17361](https://github.com/anthropics/claude-code/issues/17361), [#29071](https://github.com/anthropics/claude-code/issues/29071), [#46594](https://github.com/anthropics/claude-code/issues/46594).
 
 ## Release playbook
 
