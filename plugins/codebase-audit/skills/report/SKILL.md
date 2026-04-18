@@ -47,29 +47,59 @@ Test coverage: the script looks for existing coverage artifacts (`.coverage`, `c
 
 ### 2b. Offer to run the test suite *(optional)*
 
-This step turns a pure-static report into one with a dynamic-validation data point, which is one of the cheapest ways to strengthen the report. It is **opt-in per run** — always ask the user first, and skip cleanly when dependencies are not installed.
+This step turns a pure-static report into one with dynamic-validation data points — one per test suite in the project. It is **opt-in per suite** — always ask the user first, and skip cleanly when dependencies are not installed or the project's test commands aren't discoverable.
 
-After `collect_stats.sh` finishes, read its "Test runner detection" section. If a runner is detected and its dependencies appear installed, ask the user one question:
+**Orchestration, not rigid detection.** `collect_stats.sh` surfaces *signals* (root-level runners, nested `package.json`/`phpunit.xml`/`pyproject.toml`, README test headings, Makefile targets, package.json scripts). You assemble those signals plus a read of the project's own docs into concrete commands. **Do not guess commands** — use the ones the project documents.
 
-> "Detected `{runner}` with dependencies installed. Run the test suite and measure coverage? (y/N — default skip)"
+#### Step 2b.1 — Gather the command candidates
 
-**Run only if the user confirms.** Then:
+Read these, in order, before proposing anything:
 
-1. Run the test command for the detected runner (e.g., `vendor/bin/phpunit`, `.venv/bin/pytest --cov`, `npm test`, `go test ./...`, `cargo test`).
-2. **Time-box to 5 minutes.** Use `timeout 300 …` or equivalent. If the suite runs longer, abort and report "Timed out after 5 min".
-3. Capture: total tests, passed, failed, skipped, duration, and coverage % if the runner emits it (pytest-cov, phpunit-coverage, go test -cover, jest --coverage, nyc).
-4. **Before and after the run, confirm the working tree is clean** (`git -C {repo} status --porcelain`). If tests modified source files, discard the run results and note it in the report as "test suite appeared to modify the working tree — results discarded, rerun manually".
-5. Write the results into:
-   - §1 Summary Stats table — "Test suite run" row and "Test coverage" row.
-   - Method & Limitations block — replace the "No tests were run" line with "Test suite was executed: {N passed / M total}, coverage {X%}".
-   - The Method cell in the header table — replace "No tests were run." with "Test suite run; {passed/total} passed, coverage {X%} — see §1."
+1. The "Test runner detection" section of `/tmp/quality-assessment-stats.txt` (root-level runners + nested/monorepo scan).
+2. The "Test-command hints" section — in particular, the README headings, Makefile/Taskfile targets, and `package.json`/`composer.json` script lists.
+3. The README sections the hints surfaced (e.g., "Running Tests", "Test Coverage") — read those lines in the README directly, don't paraphrase.
+4. For a Python project: whether `uv.lock` / `poetry.lock` / `Pipfile.lock` is present (influences the runner prefix: `uv run pytest` vs `.venv/bin/pytest` vs `poetry run pytest`).
+5. For a monorepo: treat each suite separately (e.g., backend `pytest`, frontend `vitest`). Each gets its own row in §1 and its own pass/fail + coverage number.
 
-**Hard rules:**
+#### Step 2b.2 — Propose commands to the user
 
-- **Never install dependencies.** If the detection said deps are missing, skip this step silently and keep "Not measured" in §1.
-- **Never modify the target repo.** The git-status check before and after is the guard.
+For each candidate suite, propose the exact command you plan to run, citing where you got it (README line, Makefile target, package.json script). Use `AskUserQuestion` with one question per suite, each with two options: `Run` / `Skip`.
+
+Example question for flawchess:
+
+> **Backend test suite.** The README (lines 73-87) documents `uv run pytest --cov=app --cov-report=term-missing`. Run it now with a 5-minute timeout? (Run / Skip)
+
+> **Frontend test suite.** `frontend/package.json` has `"test": "vitest run"`. To capture coverage: `cd frontend && npx vitest run --coverage`. Run it now with a 5-minute timeout? (Run / Skip)
+
+If there is no documented command and you'd have to improvise — skip that suite and note "Command not documented" in the Method block. Do not invent commands.
+
+#### Step 2b.3 — Run only what the user approved
+
+For each approved suite:
+
+1. Capture `git -C {repo} status --porcelain` output. Save it.
+2. Run the command under `timeout 300 …` from the appropriate working directory (use `cd` if the command needs it, like `cd frontend && …`).
+3. Parse the output for: total tests, passed, failed, skipped, duration, coverage %. Every test runner uses a different format; read the raw output yourself, don't assume a schema.
+4. Capture `git -C {repo} status --porcelain` again. If it differs from the pre-run state, **discard the results** and record "test suite appeared to modify the working tree — results discarded, rerun manually".
+5. If the run exited non-zero but all tests passed (e.g., a shellcheck error from a wrapper), still report passed/total — but flag "exit code non-zero, investigate" in the Method block.
+
+#### Step 2b.4 — Write the results
+
+Per approved suite, add one row to §1 Summary Stats:
+
+| Test suite run — backend | `172 passed / 172, coverage 78%` | `uv run pytest --cov=app` (from README line 73) |
+| Test suite run — frontend | `43 passed / 45, 2 failed, coverage 61%` | `cd frontend && npx vitest run --coverage` (from frontend/package.json) |
+
+Update the Method & Limitations block's "Dynamic validation" line with per-suite summary (e.g., "Backend: 172 passed / 172, 78% cov. Frontend: 43 passed / 45, 2 failed, 61% cov."). Update the Method cell in the header table likewise.
+
+#### Hard rules (unchanged)
+
+- **Never install dependencies.** If the hints say deps aren't installed for a suite, skip that suite and say so.
+- **Never modify the target repo.** The pre/post `git status --porcelain` check is the guard.
 - **Never use test results to override the Maintainability grade.** That grade is about test-suite design (coverage, integration vs unit, CI gating); pass/fail is a separate, empirical data point reported alongside.
-- If declined, skipped, or errored: report coverage as "Not measured" and add "No tests were run." to the Method & Limitations block. Proceed to Step 3.
+- **Time-box each suite to 5 minutes.** If exceeded, abort that suite and record "Timed out after 5 min" — but continue to other suites.
+- If a suite is declined, skipped, or errored: report that suite's row as `Not executed` with the reason. Other suites are unaffected.
+- If *all* suites are skipped: report coverage as "Not measured" in §1 and add "No tests were run." to the Method & Limitations block. Proceed to Step 3.
 
 ### 3. Survey operational context
 

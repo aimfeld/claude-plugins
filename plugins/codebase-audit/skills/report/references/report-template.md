@@ -34,7 +34,10 @@ Save the filled-in report to `reports/{project-name}_quality_assessment_{YYYY-MM
 - **Likely** — claim backed by spot-check of representative files, or strongly implied by configuration.
 - **Inferred** — claim backed by absence of contrary evidence (e.g., "no `.github/workflows/` found → no CI"). Inferred ≠ wrong, but is the most likely to miss something the repo's maintainers know that the static analysis cannot see.
 
-**Dynamic validation.** {One of: "No tests were run; the Maintainability grade reflects static inspection of the test suite only." OR "Test suite was executed: {N passed / M total}, coverage {X%}. Results appear in §1 Summary Stats and are separate from the Maintainability grade, which reflects test-suite design, not runtime pass/fail."}
+**Dynamic validation.** {One of:
+- "No tests were run; the Maintainability grade reflects static inspection of the test suite only."
+- "Backend suite: {N passed / M total}, coverage {X%}. Frontend suite: {N passed / M total}, coverage {X%}. Per-suite details in §1 Summary Stats. Results are separate from the Maintainability grade, which reflects test-suite design, not runtime pass/fail."
+- "Partial: backend suite run ({N/M, X%}); frontend suite skipped (deps not installed / user declined)." }
 
 **Grade rubric.** A = best-practice everywhere. B = solid with small known gaps. C = works but has real rough edges. D = risky, don't ship. F = broken or absent. `+` / `−` denote half-steps; a dimension drops one tier for each missing obvious element (no backups, no deps automation, etc.). See the §2 Executive Summary table for the per-dimension grades.
 
@@ -47,8 +50,9 @@ Save the filled-in report to `reports/{project-name}_quality_assessment_{YYYY-MM
 | Total code LOC | {N} | {language breakdown, e.g., "Python 8,600 / TypeScript 13,400 / SQL 420"} |
 | Comment LOC | {N} ({X}%) | {"density looks healthy" / "very sparse" / "tokei not installed, approximate"} |
 | Test LOC | {N} ({X}% of code LOC) | {"32 pytest files; high ratio reflects integration-test style" etc.} |
-| Test suite run | `Not executed` or `{X passed / Y total, Z failed, Wskipped}` | {"Skipped: deps not installed" / "Skipped: user declined" / "Executed via `vendor/bin/phpunit`" — see Method & Limitations block} |
-| Test coverage | {X%} or `Not measured` | {coverage source file, or "no .coverage / lcov.info found — run `pytest --cov` to measure"} |
+| Test suite run — {suite name, e.g. backend} | `Not executed` or `{X passed / Y total, Z failed, Wskipped, coverage Z%}` | {exact command used + source, e.g. "`uv run pytest --cov=app` (README line 73)" — or "Skipped: deps not installed" / "Skipped: user declined"} |
+| Test suite run — {suite name, e.g. frontend} | `Not executed` or `{...}` | {exact command used + source — e.g. "`cd frontend && npx vitest run --coverage` (frontend/package.json script)". Add one row per suite in a monorepo; delete this row if project has only one suite.} |
+| Test coverage | {X%} or `Not measured` | {coverage source file, or "no .coverage / lcov.info found — run `pytest --cov` to measure". In a monorepo, the per-suite rows above are the authoritative numbers; this row stays "Not measured" unless a single aggregate exists.} |
 | Commits (last 90 days) | {N} | {pace note, e.g., "active, single maintainer"} |
 | Active contributors (last 90 days) | {N} | — |
 | Primary languages | {list, e.g., "Python, TypeScript, SQL"} | — |
