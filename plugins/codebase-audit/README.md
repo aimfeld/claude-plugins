@@ -20,7 +20,7 @@ A single Markdown report (~3–6 pages) written to `reports/{project}_quality_as
 
 ## Example report
 
-A full sample assessment of a production open-source codebase lives at [`examples/flawchess_quality_assessment_2026-04-17.md`](./examples/flawchess_quality_assessment_2026-04-17.md). A taste:
+A full sample assessment of a production open-source codebase lives at [`examples/flawchess_quality_assessment_2026-04-18.md`](./examples/flawchess_quality_assessment_2026-04-18.md). A taste:
 
 ### Summary stats (excerpt)
 
@@ -28,35 +28,36 @@ A full sample assessment of a production open-source codebase lives at [`example
 |---|---|---|
 | Total code LOC | 39,531 (Python 25,509 + TSX 11,140 + TS 2,882) | `tokei` exact counts |
 | Test LOC | 19,034 across 39 files | Test/code ratio ≈ 48% |
-| Test coverage | Not measured | `htmlcov/` present but not parsed |
-| Commits (last 90 days) | 775 | Extremely active (~8.6/day) |
+| Test suite run — backend | `810 passed / 810, coverage 89%` | `uv run pytest --cov=app` in 16.21s against a real Postgres 18 container |
+| Test suite run — frontend | `77 passed / 77, coverage 87%` (covered files only) | `vitest run --coverage` — measures the ~100 LOC of utilities imported by 6 test files, not the full `src/` tree |
+| Commits (last 90 days) | 776 | Extremely active (~8.6/day) |
 | Active contributors (last 90 days) | 2 (same person, two emails) | Effectively single-maintainer |
 
 ### Executive summary
 
 | Dimension | Grade | One-line finding |
 |---|---|---|
-| Architecture | **A−** | Clean router → service → repository layering across 7,102 LOC of services/repos; one outlier: `endgame_service.py:1701` is a 1,701-LOC god-file bundling classification, aggregation, and formatting. |
-| Code duplication | **A** | Single `apply_game_filters()` (`app/repositories/query_utils.py:13`) consumed by 6 repositories; 0 asyncio.gather-on-session violations across `app/`. |
-| Error handling / Observability | **A−** | 13 `sentry_sdk.capture_exception()` sites across 7 files + 3 in scripts/; documented retry-last-attempt discipline (`chesscom_client.py:100`, `lichess_client.py:126`); `_sentry_before_send` fingerprints transient DB errors (`main.py:23-39`). |
-| Secrets / config | **A** | `.env`, `prod.env`, `.envrc` gitignored; only `.env.example` tracked. Pydantic-settings-driven config (`app/core/config.py:4-22`). CI uses GitHub Secrets for SSH. |
-| Code smells | **A** | 0 `TODO`/`FIXME`/`XXX`/`HACK` in tracked source (the 4 hits are inside `reports/` from the prior audit file). |
-| Maintainability / tests | **A** | 39 test files / 19,034 LOC against a real Postgres 18 container (CI service + `conftest.py:69-99`); CI gates ruff → ty → pytest → eslint → tsc → vitest → knip. |
-| Security | **A−** | FastAPI-Users JWT + Google OAuth; CSRF double-submit cookie fix for CVE-2025-68481 with `secrets.compare_digest` (`auth.py:85-96, 141-147`); `send_default_pii=False` (`main.py:54`); IP rate limit on guest creation (`auth.py:225-229`). `decode_jwt` exception at `auth.py:132-137` catches bare `Exception` — intentional but coarse. |
-| Database design | **A** | All FKs declare `ondelete="CASCADE"` (models verified individually); unique constraints on natural keys (`uq_games_user_platform_game_id`); deliberate types (`SmallInteger` for ply/material, `BigInteger` for Zobrist hashes, `Float(24)` for clock seconds); partial + covering indexes with `postgresql_where` / `postgresql_include` (`game_position.py:22-34`). |
-| Frontend quality | **A−** | Strict TS with `noUncheckedIndexedAccess` (`tsconfig.app.json:21`); `theme.ts` centralizes colors (79 LOC); knip enforced in CI; `data-testid` conventions documented and applied; `Sentry.ErrorBoundary` at app root (`App.tsx:469`). Gap: no `React.lazy` anywhere — 0 lazy imports found. |
-| Observability | **A−** | Sentry on both ends with `beforeSend` fingerprinting; `pg_stat_statements` preloaded (`docker-compose.yml:12-15`); self-hosted Umami analytics. No structured/JSON logging in backend — plain `logging.getLogger`. |
-| Performance | **A−** | Fully async (no `requests`); 0 `asyncio.gather` calls on `AsyncSession`; deliberate batch tuning (10 → 28 games, `import_service.py:37`) with OOM rationale; Zobrist integer equality on indexed columns; covering indexes eliminate sequential scans for endgame aggregation. |
-| Disaster recovery / backups | **B−** | Hetzner-managed daily VM snapshots, 7-day rolling (README:107-117); no `pg_dump` cron, no PITR / WAL archiving. Acknowledged as a gap in README. RPO up to 24 hours; no tested restore on record. |
-| Data privacy / GDPR | **C+** | Privacy policy exists (`Privacy.tsx:1-80`); deletion is email-only (`support@flawchess.com`) — no in-app endpoint. `ondelete=CASCADE` on every user-owned table, so email-handler deletion would fully propagate, but the manual path is a friction gate for a GDPR-Art.17 request. No data export endpoint. |
-| Dependency management | **C** | No `.github/dependabot.yml`, no `renovate.json`. Lockfiles committed and verified (`npm ci`, `uv sync --locked`). No `npm audit` or `pip-audit` step in CI. Docker base image is `python:3.13-slim` (tag, not SHA). |
-| Frontend bundle / perf | **B−** | Production `index-CMxKKtn3.js` = 980 KB raw / 286 KB gz; CSS 96 KB / 16 KB gz. Single chunk — no route-based splitting, no lazy loading of recharts/react-chessboard. PWA with service-worker caching is correctly wired. |
-| CI/CD execution speed | **A−** | Median 2:00-2:30 across last 20 main runs (e.g. 20:37→20:40 = 2:28, 18:49→18:51 = 1:40); backend + frontend serialized in one job. No pytest-xdist or vitest shard — fine at current scale. Deploy = `workflow_dispatch` only with post-deploy health check. |
-| Technical debt / legacy stack | **A** | Python 3.13, Node 24, React 19, FastAPI 0.115, Vite 7, Tailwind 4, PostgreSQL 18, SQLAlchemy 2.x — all current majors. No archived/orphaned direct deps spotted. No deprecated-API usage or `# do not bump` blockers grep'd. |
+| Architecture | **A−** | Clean router → service → repository layering; zero SQL in routers; two outlier god-files (`endgame_service.py` 1,701 LOC, `endgame_repository.py` 775 LOC) justified by domain but ripe for split. |
+| Code duplication | **A** | `query_utils.apply_game_filters()` is the single source for game filtering across all repositories (`query_utils.py:13`). |
+| Error handling / Observability | **A−** | 10+ `sentry_sdk.capture_exception` sites with thoughtful cause-chain fingerprinting (`main.py:23-39`); plain-text `logging.getLogger(__name__)` across 5 services, no structured JSON. |
+| Secrets / config | **A−** | `.env` and `prod.env` are `.gitignored` and never committed; defaults explicit; stale comment at `config.py:14` claims "development bypasses JWT auth" but no such bypass exists in the code — misleading. |
+| Code smells | **A** | Zero TODO/FIXME/HACK markers; magic numbers extracted into named constants (`DEFAULT_ELO_THRESHOLD`, `_BATCH_SIZE`); no commented-out blocks. |
+| Maintainability / tests | **B+** | Backend excellent (810 tests, 89% cov, real-DB pytest-asyncio); frontend has only 6 utility tests, zero component/page tests; CI runs ruff + ty + pytest + eslint + vitest + knip — strong gating. |
+| Security | **A−** | JWT + OAuth with CSRF double-submit (`auth.py:85-96`, "CVE-2025-68481 fix" comment), timing-safe CSRF comparison, IP rate-limiter on guest creation, ORM-only queries (zero `text(`), Pydantic validation at every router boundary. Sole finding: stale/misleading comment at `config.py:14`. |
+| Database design | **A** | All FKs use `ondelete="CASCADE"` (5/5), named `UniqueConstraint`s on natural keys, compound indexes on `(user_id, full_hash)` etc., 39 Alembic migrations with `downgrade()` coverage. |
+| Frontend quality | **A−** | Strict TS (`noUncheckedIndexedAccess` on), zero `@ts-ignore`/`as any`, centralized `theme.ts`, 319 `data-testid` + 64 `aria-label` occurrences, knip in CI. Gap: zero component/page unit tests. |
+| Observability | **B** | Sentry backend + frontend + `before_send` fingerprint; `pg_stat_statements` loaded (`docker-compose.yml:12`); Umami web analytics self-hosted. No structured-JSON logging, no request-ID correlation header, no metrics endpoint. |
+| Performance | **A−** | Async-correct throughout (no `asyncio.gather` on shared sessions, no blocking `requests`/`time.sleep`), `_BATCH_SIZE=28` on imports after OOM incident (`import_service.py:37`), chunked `INSERT`s respect PG param limit (`game_repository.py:88-91`). Single main bundle (286 KB gz) is borderline — no code splitting. |
+| Disaster recovery / backups | **B** | Hetzner daily whole-server snapshot, 7-day rolling retention. No PITR (no WAL archiving), no separate logical `pg_dump` for longer horizons, no tested restore on record. |
+| Data privacy / GDPR | **B−** | Privacy policy page, consent-via-signup, Sentry `send_default_pii=False` (`main.py:54`), cascade delete wired through schema. Deletion is email-request-only (`Privacy.tsx:57-70`) — no self-service `DELETE /users/me` endpoint, no data-export endpoint. |
+| Dependency management | **C+** | Lockfiles committed and verified in CI; no Dependabot / Renovate configured; no `pip-audit`/`npm audit` in CI; Dockerfile base image `python:3.13-slim` floating (not pinned to digest). |
+| Frontend bundle / perf | **B** | Main bundle 980 KB raw / 286 KB gz (single chunk, no `React.lazy`), PWA + Workbox configured sanely, prerender plugin for SEO, VitePWA polling every 60 min to avoid stale JS. Should code-split the endgame-charts route from the opening-explorer route. |
+| CI/CD execution speed | **A−** | ~2m25s median across last 5 runs. ruff → ty → pytest → eslint → tsc/vite → vitest → knip in sequence, single job, `uv sync --locked`. Deploy gated behind manual `workflow_dispatch` with health-check loop. |
+| Technical debt / legacy stack | **A** | Python 3.13, Node 24, React 19, FastAPI 0.115, Vite 7, PostgreSQL 18, SQLAlchemy 2.x async — all current majors. Zero deprecated APIs; no archived direct deps. `ty` (preview-stage type checker) is the only novel-tech bet. |
 
-> **Bottom line.** Production-grade for its footprint. The codebase punches above its weight: 39,500 LOC with a disciplined layering convention, a single shared filter utility, a real-Postgres test harness with a 48% test/code ratio, and type safety locked in on both ends (`ty` + `noUncheckedIndexedAccess`). The two meaningful gaps are supply-chain automation (no Dependabot/Renovate, no CVE audit in CI) and a heavy single-chunk frontend bundle (980 KB raw / 286 KB gz). GDPR deletion via email-only is acceptable for a solo project but would not survive a regulatory audit of a multi-staff org. Remaining work is refinement — Dependabot, code splitting, `pg_dump` as a second backup layer — not rescue.
+> **Bottom line.** Production-grade for a single-maintainer project. The central architectural bet (Zobrist-hash position matching via compound indexes) is load-bearing and sound, the backend discipline is near-exemplary (strict typing via `ty`, clean layering, 89% test coverage, real-DB integration tests), and the deploy path is boringly reliable. The genuine gaps are narrow and well-known: no automated dependency updates, no self-service account deletion, no frontend component tests, and a single 980 KB main JS bundle. Remaining work is polish — closing four small, cheap gaps — not rescue.
 
-[Read the full report →](./examples/flawchess_quality_assessment_2026-04-17.md)
+[Read the full report →](./examples/flawchess_quality_assessment_2026-04-18.md)
 
 ## Dimensions graded
 
