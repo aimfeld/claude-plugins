@@ -13,10 +13,33 @@ Save the filled-in report to `reports/{project-name}_quality_assessment_{YYYY-MM
 |--------|---------------------------------------------------------------------------------------------|
 | Date   | {YYYY-MM-DD}                                                                                |
 | Scope  | `{/absolute/path/to/repo}` (summary from stats script — e.g., "≈8,600 LOC backend Python, ≈13,400 LOC TypeScript, 32 test files / ≈14,000 LOC of tests") |
-| Author | {generator identity — e.g., "Claude via the quality-assessment skill"}                      |
-| Method | Static analysis of the repository at commit `{short-sha}` on branch `{branch}`. No tests were run. |
+| Author | {generator identity with plugin version — e.g., "Claude (Opus 4.7) via the `codebase-audit:report` skill (v{X.Y.Z})". Read `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` to get the version field.} |
+| Method | Static analysis of the repository at commit `{short-sha}` on branch `{branch}`. {"No tests were run." OR "Test suite run; {passed/total} passed, coverage {X%} — see §1."} |
 
 **Context.** {2-4 sentence paragraph describing what the project does, who it serves, and the stack. Pull from README/CLAUDE.md. Include deployment shape if known (e.g., "Single-box Hetzner deployment behind Caddy"). This is the reader's orientation — get it right.}
+
+---
+
+## Method & Limitations
+
+*(This block is mandatory. It preempts the "is this an audit?" question a reader asks within 30 seconds of opening the report.)*
+
+**What this is.** A senior-engineer static review of a git repo at a specific commit, produced by Claude via the `codebase-audit:report` skill in minutes. Every non-trivial claim cites `file:line` so a reviewer can verify each finding in under a minute.
+
+**What this is not.** Not a formal audit. No interviews with the development team. No legal or professional accountability. No ISO 25010 weighted-scoring methodology. No dynamic penetration testing or load testing. Use this as a first-pass engineering review, not as a substitute for an investor-grade or compliance-grade assessment.
+
+**Confidence levels.** Each finding in the §5 Findings Register is tagged with one of three confidence levels:
+
+- **Verified** — claim backed by end-to-end reading of the cited file(s).
+- **Likely** — claim backed by spot-check of representative files, or strongly implied by configuration.
+- **Inferred** — claim backed by absence of contrary evidence (e.g., "no `.github/workflows/` found → no CI"). Inferred ≠ wrong, but is the most likely to miss something the repo's maintainers know that the static analysis cannot see.
+
+**Dynamic validation.** {One of:
+- "No tests were run; the Maintainability grade reflects static inspection of the test suite only."
+- "Backend suite: {N passed / M total}, coverage {X%}. Frontend suite: {N passed / M total}, coverage {X%}. Per-suite details in §1 Summary Stats. Results are separate from the Maintainability grade, which reflects test-suite design, not runtime pass/fail."
+- "Partial: backend suite run ({N/M, X%}); frontend suite skipped (deps not installed / user declined)." }
+
+**Grade rubric.** A = best-practice everywhere. B = solid with small known gaps. C = works but has real rough edges. D = risky, don't ship. F = broken or absent. `+` / `−` denote half-steps; a dimension drops one tier for each missing obvious element (no backups, no deps automation, etc.). See the §2 Executive Summary table for the per-dimension grades.
 
 ---
 
@@ -27,7 +50,9 @@ Save the filled-in report to `reports/{project-name}_quality_assessment_{YYYY-MM
 | Total code LOC | {N} | {language breakdown, e.g., "Python 8,600 / TypeScript 13,400 / SQL 420"} |
 | Comment LOC | {N} ({X}%) | {"density looks healthy" / "very sparse" / "tokei not installed, approximate"} |
 | Test LOC | {N} ({X}% of code LOC) | {"32 pytest files; high ratio reflects integration-test style" etc.} |
-| Test coverage | {X%} or `Not measured` | {coverage source file, or "no .coverage / lcov.info found — run `pytest --cov` to measure"} |
+| Test suite run — {suite name, e.g. backend} | `Not executed` or `{X passed / Y total, Z failed, Wskipped, coverage Z%}` | {exact command used + source, e.g. "`uv run pytest --cov=app` (README line 73)" — or "Skipped: deps not installed" / "Skipped: user declined"} |
+| Test suite run — {suite name, e.g. frontend} | `Not executed` or `{...}` | {exact command used + source — e.g. "`cd frontend && npx vitest run --coverage` (frontend/package.json script)". Add one row per suite in a monorepo; delete this row if project has only one suite.} |
+| Test coverage | {X%} or `Not measured` | {coverage source file, or "no .coverage / lcov.info found — run `pytest --cov` to measure". In a monorepo, the per-suite rows above are the authoritative numbers; this row stays "Not measured" unless a single aggregate exists.} |
 | Commits (last 90 days) | {N} | {pace note, e.g., "active, single maintainer"} |
 | Active contributors (last 90 days) | {N} | — |
 | Primary languages | {list, e.g., "Python, TypeScript, SQL"} | — |
@@ -192,18 +217,35 @@ If no frontend exists: `— N/A: backend-only service`.
 
 ---
 
-## 5. Substantial Problems Worth Addressing
+## 5. Findings Register
 
-Concrete items a reviewer would file as tickets. Numbered, with an effort estimate and a rationale.
+A consolidated, machine-readable view of every finding a reviewer would track. Rows are drawn from §4 subsections; this table exists so a reader can triage without reading the full narrative. High/Critical rows must reappear in §6 Substantial Problems; Medium/Low roll into §8 Recommended Actions.
 
-1. **{Problem title}.** {2-3 sentences describing the gap and why it matters. Cite the evidence. Suggest a minimal fix.} *(effort: {≈X minutes/hours})*
-2. ...
+**Severity**: Critical = production-blocking or data-loss risk; High = likely to cause incidents within 3 months; Medium = real risk but bounded; Low = minor quality/hygiene.
+**Confidence** (from Method & Limitations block): Verified / Likely / Inferred.
+**Effort**: ≤1h / half-day / 1d / >1d.
 
-Aim for 4-8 items. Do not pad with trivia. Do not list problems you already flagged in section 4 unless they rise to "reviewer would file a ticket" severity.
+| ID | Dimension | Finding | Severity | Confidence | Evidence | Effort |
+|---|---|---|---|---|---|---|
+| F-01 | {dim} | {one-line finding} | {Critical/High/Medium/Low} | {Verified/Likely/Inferred} | `{file:line}` | {≤1h / half-day / 1d / >1d} |
+| F-02 | ... | ... | ... | ... | ... | ... |
+
+Aim for 10–25 rows. Not every §4 bullet becomes a row — only findings a reviewer would actually file as a ticket. If a dimension has no ticket-worthy findings, it simply has no rows here (don't add filler).
 
 ---
 
-## 6. What's Notably Good
+## 6. Substantial Problems Worth Addressing
+
+Concrete items a reviewer would file as tickets. Numbered, with an effort estimate and a rationale. Every Critical and High row from §5 must appear here.
+
+1. **{Problem title}.** {2-3 sentences describing the gap and why it matters. Cite the evidence. Suggest a minimal fix.} *(effort: {≈X minutes/hours}, maps to §5 F-0N)*
+2. ...
+
+Aim for 4-8 items. Do not pad with trivia.
+
+---
+
+## 7. What's Notably Good
 
 Patterns worth keeping and copying. 4-8 bullets. Be specific — "Zobrist-hash position matching" or "single `apply_game_filters()` utility" is better than "good code organization".
 
@@ -212,7 +254,7 @@ Patterns worth keeping and copying. 4-8 bullets. Be specific — "Zobrist-hash p
 
 ---
 
-## 7. Recommended Actions
+## 8. Recommended Actions
 
 Three time-boxed buckets.
 
@@ -232,7 +274,7 @@ N+1. ...
 
 ---
 
-## 8. Bottom Line
+## 9. Bottom Line
 
 {One paragraph, 4-6 sentences. Final verdict. Who should read this codebase top-to-bottom? What should they expect? Is there a rewrite hiding in here, or is this "make a good thing better" territory? Close with a single sentence the user can quote.}
 ```
@@ -241,9 +283,12 @@ N+1. ...
 
 ## Notes for the skill-runner
 
-- The **Summary Stats** table (§1) is new — older reports didn't have it. Always include it, even when numbers are approximate. Mark approximations in the Notes column.
+- The **Author row** must include the plugin version. Read `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json`, pull the `version` field, and substitute into the Author cell as `Claude (Opus 4.7) via the \`codebase-audit:report\` skill (vX.Y.Z)`. This makes every saved report self-identifying.
+- The **Method & Limitations block** (between Context and §1) is mandatory. Fill the "Dynamic validation" bullet based on whether Step 2b ran: if tests were run, state pass/fail + coverage; if not, state "No tests were run."
+- The **Summary Stats** table (§1) is mandatory. "Test suite run" and "Test coverage" rows default to `Not executed` / `Not measured`; only populate with numbers when Step 2b ran successfully.
 - The **Disaster Recovery & Backups subsection** (§3) is mandatory. If you cannot find evidence of a backup strategy, say so explicitly — do not omit the subsection.
 - The **dimension grade table** (§2) must include all 17 dimensions, including the newer ones (12-17). Use `— N/A` with a reason for rows that don't apply to this project type.
 - When a dimension is listed in the executive summary table, it must have a corresponding subsection in §4. Do not grade something in §2 and then skip it in §4.
-- Section 5 items should be actionable. "Improve observability" is not actionable; "Add `sentry_sdk.set_context()` at the top of the 4 long-running service entry points, ≈ 1 hour" is.
-- Section 7's medium-term bucket should mention Dependabot / Renovate explicitly if the project lacks automated dependency updates.
+- The **Findings Register** (§5) is mandatory. 10–25 rows, drawn from §4 subsections; each row needs Severity × Confidence × Evidence × Effort. Every Critical and High row must reappear in §6.
+- §6 Substantial Problems items should be actionable. "Improve observability" is not actionable; "Add `sentry_sdk.set_context()` at the top of the 4 long-running service entry points, ≈ 1 hour" is.
+- §8 Recommended Actions medium-term bucket should mention Dependabot / Renovate explicitly if the project lacks automated dependency updates.

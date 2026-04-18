@@ -8,10 +8,12 @@ Every grade and finding is backed by a concrete `file:line` pointer so a reviewe
 
 A single Markdown report (~3–6 pages) written to `reports/{project}_quality_assessment_{YYYY-MM-DD}.md`:
 
-- **Summary stats** — LOC, test LOC, test/code ratio, coverage, commits in last 90 days, active contributors, primary languages
+- **Method & Limitations block** — states what the report is and is not, defines confidence levels (Verified / Likely / Inferred), and reprints the grade rubric inline
+- **Summary stats** — LOC, test LOC, test/code ratio, test-suite run (optional), coverage, commits in last 90 days, active contributors, primary languages
 - **Executive summary** — graded table across 17 dimensions, with a 3–4 sentence bottom line
 - **Operational picture** — numbered data-flow walkthrough (how the system actually runs)
 - **Per-dimension findings** — each with `file:line` evidence
+- **Findings Register** — consolidated table: ID × Dimension × Finding × Severity × Confidence × Evidence × Effort
 - **Substantial problems** — numbered, with effort estimates
 - **What's notably good** — patterns worth keeping
 - **Recommended actions** — Immediate / Short term / Medium term

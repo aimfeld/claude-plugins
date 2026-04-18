@@ -2,6 +2,20 @@
 
 All notable changes to the `codebase-audit` plugin are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] — 2026-04-18
+
+### Added
+- **Method & Limitations block** (mandatory, between Context and §1 Summary Stats) stating what the report is and is not, defining three confidence levels (Verified / Likely / Inferred), reporting dynamic-validation status, and surfacing the grade rubric inline so readers see it before the grade table. Closes the "is this an audit?" question both external reviewers opened with. ([#7](https://github.com/aimfeld/claude-plugins/pull/7))
+- **§5 Findings Register** — a consolidated table with columns `ID × Dimension × Finding × Severity × Confidence × Evidence × Effort`. Turns narrative §4 findings into a register a reviewer or PM can triage without reading the full report. Every Critical/High row must reappear in §6 Substantial Problems. ([#7](https://github.com/aimfeld/claude-plugins/pull/7))
+- **Plugin version in Author field** — the Author row in the header table now carries the plugin version (e.g. `Claude (Opus 4.7) via the codebase-audit:report skill (v0.3.0)`) read from `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json`. Every saved report is self-identifying. ([#7](https://github.com/aimfeld/claude-plugins/pull/7))
+- **Optional Step 2b: per-suite test execution with coverage.** Orchestration-based rather than rigid-command: the skill reads `collect_stats.sh` detection output + the project's README / Makefile / `package.json` scripts / `composer.json` scripts, proposes the exact documented commands to the user per suite (`AskUserQuestion`, one question per suite), and runs only what the user approves. Each suite gets its own row in §1 Summary Stats. Never invents commands, never installs dependencies, never modifies the target repo. 5-minute timeout per suite with pre/post `git status --porcelain` guard. ([#7](https://github.com/aimfeld/claude-plugins/pull/7))
+- **Monorepo-aware test-runner detection in `collect_stats.sh`** (detect-only; no execution). Scans depth ≤3 for nested `package.json` test scripts, `phpunit.xml`, and `pyproject.toml` `[tool.pytest]`. Surfaces test-command hints (README "Running Tests" headings, `Makefile`/`justfile`/`Taskfile` test targets, `package.json`/`composer.json`/`pyproject.toml` script lines) so Step 2b can propose the project's documented commands instead of guessing. ([#7](https://github.com/aimfeld/claude-plugins/pull/7))
+- **Three-phrasing confidence convention for §4 prose** (Verified / Likely / Inferred) aligned with the Findings Register Confidence column so narrative and register agree. ([#7](https://github.com/aimfeld/claude-plugins/pull/7))
+
+### Changed
+- **Report section numbering renumbered** to accommodate the new §5 Findings Register. What was §5 Substantial Problems is now §6; §6 Notably Good → §7; §7 Recommended Actions → §8; §8 Bottom Line → §9. Older archived reports keep their original numbering; new reports use the v0.3 layout. ([#7](https://github.com/aimfeld/claude-plugins/pull/7))
+- **Summary Stats table** adds one "Test suite run — {suite}" row per suite (e.g. backend, frontend) with the exact command used + where it came from. The existing "Test coverage" row remains for single-suite projects or as an aggregate when one exists. ([#7](https://github.com/aimfeld/claude-plugins/pull/7))
+
 ## [0.2.1] — 2026-04-17
 
 ### Added
@@ -26,6 +40,7 @@ All notable changes to the `codebase-audit` plugin are documented here. Format f
 ### Added
 - Initial release: 16-dimension quality assessment skill with evidence-based grading and `file:line` citations.
 
+[0.3.0]: https://github.com/aimfeld/claude-plugins/releases/tag/codebase-audit-v0.3.0
 [0.2.1]: https://github.com/aimfeld/claude-plugins/releases/tag/codebase-audit-v0.2.1
 [0.2.0]: https://github.com/aimfeld/claude-plugins/releases/tag/codebase-audit-v0.2.0
 [0.1.0]: https://github.com/aimfeld/claude-plugins/releases/tag/codebase-audit-v0.1.0

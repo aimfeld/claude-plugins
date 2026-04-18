@@ -43,7 +43,63 @@ The script writes a machine-readable summary to `/tmp/quality-assessment-stats.t
 
 If `tokei` is not installed, the script will ask whether to install it. Tokei gives accurate LOC with code/comment/blank split across languages; the fallback (`git ls-files` + `wc -l`) only gives a rough total. If the user declines, report stats as "approximate".
 
-Test coverage: the script looks for existing coverage artifacts (`.coverage`, `coverage.xml`, `lcov.info`, `coverage/coverage-summary.json`, `htmlcov/`, Go coverprofile, etc.). It does **not** run tests — if no artifact exists, report coverage as "not measured" and recommend running coverage as a follow-up. Do not silently omit the coverage row.
+Test coverage: the script looks for existing coverage artifacts (`.coverage`, `coverage.xml`, `lcov.info`, `coverage/coverage-summary.json`, `htmlcov/`, Go coverprofile, etc.). It does **not** run tests by itself — if no artifact exists, report coverage as "not measured" and proceed to Step 2b (optional test run) before falling back to "not measured".
+
+### 2b. Offer to run the test suite *(optional)*
+
+This step turns a pure-static report into one with dynamic-validation data points — one per test suite in the project. It is **opt-in per suite** — always ask the user first, and skip cleanly when dependencies are not installed or the project's test commands aren't discoverable.
+
+**Orchestration, not rigid detection.** `collect_stats.sh` surfaces *signals* (root-level runners, nested `package.json`/`phpunit.xml`/`pyproject.toml`, README test headings, Makefile targets, package.json scripts). You assemble those signals plus a read of the project's own docs into concrete commands. **Do not guess commands** — use the ones the project documents.
+
+#### Step 2b.1 — Gather the command candidates
+
+Read these, in order, before proposing anything:
+
+1. The "Test runner detection" section of `/tmp/quality-assessment-stats.txt` (root-level runners + nested/monorepo scan).
+2. The "Test-command hints" section — in particular, the README headings, Makefile/Taskfile targets, and `package.json`/`composer.json` script lists.
+3. The README sections the hints surfaced (e.g., "Running Tests", "Test Coverage") — read those lines in the README directly, don't paraphrase.
+4. For a Python project: whether `uv.lock` / `poetry.lock` / `Pipfile.lock` is present (influences the runner prefix: `uv run pytest` vs `.venv/bin/pytest` vs `poetry run pytest`).
+5. For a monorepo: treat each suite separately (e.g., backend `pytest`, frontend `vitest`). Each gets its own row in §1 and its own pass/fail + coverage number.
+
+#### Step 2b.2 — Propose commands to the user
+
+For each candidate suite, propose the exact command you plan to run, citing where you got it (README line, Makefile target, package.json script). Use `AskUserQuestion` with one question per suite, each with two options: `Run` / `Skip`.
+
+Example question for flawchess:
+
+> **Backend test suite.** The README (lines 73-87) documents `uv run pytest --cov=app --cov-report=term-missing`. Run it now with a 5-minute timeout? (Run / Skip)
+
+> **Frontend test suite.** `frontend/package.json` has `"test": "vitest run"`. To capture coverage: `cd frontend && npx vitest run --coverage`. Run it now with a 5-minute timeout? (Run / Skip)
+
+If there is no documented command and you'd have to improvise — skip that suite and note "Command not documented" in the Method block. Do not invent commands.
+
+#### Step 2b.3 — Run only what the user approved
+
+For each approved suite:
+
+1. Capture `git -C {repo} status --porcelain` output. Save it.
+2. Run the command under `timeout 300 …` from the appropriate working directory (use `cd` if the command needs it, like `cd frontend && …`).
+3. Parse the output for: total tests, passed, failed, skipped, duration, coverage %. Every test runner uses a different format; read the raw output yourself, don't assume a schema.
+4. Capture `git -C {repo} status --porcelain` again. If it differs from the pre-run state, **discard the results** and record "test suite appeared to modify the working tree — results discarded, rerun manually".
+5. If the run exited non-zero but all tests passed (e.g., a shellcheck error from a wrapper), still report passed/total — but flag "exit code non-zero, investigate" in the Method block.
+
+#### Step 2b.4 — Write the results
+
+Per approved suite, add one row to §1 Summary Stats:
+
+| Test suite run — backend | `172 passed / 172, coverage 78%` | `uv run pytest --cov=app` (from README line 73) |
+| Test suite run — frontend | `43 passed / 45, 2 failed, coverage 61%` | `cd frontend && npx vitest run --coverage` (from frontend/package.json) |
+
+Update the Method & Limitations block's "Dynamic validation" line with per-suite summary (e.g., "Backend: 172 passed / 172, 78% cov. Frontend: 43 passed / 45, 2 failed, 61% cov."). Update the Method cell in the header table likewise.
+
+#### Hard rules (unchanged)
+
+- **Never install dependencies.** If the hints say deps aren't installed for a suite, skip that suite and say so.
+- **Never modify the target repo.** The pre/post `git status --porcelain` check is the guard.
+- **Never use test results to override the Maintainability grade.** That grade is about test-suite design (coverage, integration vs unit, CI gating); pass/fail is a separate, empirical data point reported alongside.
+- **Time-box each suite to 5 minutes.** If exceeded, abort that suite and record "Timed out after 5 min" — but continue to other suites.
+- If a suite is declined, skipped, or errored: report that suite's row as `Not executed` with the reason. Other suites are unaffected.
+- If *all* suites are skipped: report coverage as "Not measured" in §1 and add "No tests were run." to the Method & Limitations block. Proceed to Step 3.
 
 ### 3. Survey operational context
 
@@ -73,6 +129,12 @@ Per-language probes (what to grep for, which config files, which tools are idiom
 ### 5. Write the report
 
 Use the exact structure in `references/report-template.md`. Fill each section with findings from step 4, citing file:line. Do not invent sections the template does not have, and do not skip sections (if a section doesn't apply, say so explicitly with one sentence).
+
+**Author field.** Read `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` and substitute the `version` field into the Author row, producing e.g. `Claude (Opus 4.7) via the codebase-audit:report skill (v0.3.0)`. Every saved report must carry the plugin version so readers can tell which revision of the skill produced it.
+
+**Method & Limitations block.** Mandatory. Sits between the Context paragraph and §1 Summary Stats. Fill the "Dynamic validation" line based on whether Step 2b ran — pass/fail + coverage if it did, "No tests were run" otherwise. Do not paraphrase the grade rubric; copy it from the template verbatim so the ladder is consistent across reports.
+
+**Findings Register (§5).** Mandatory. Populate with 10–25 rows drawn from §4 subsections — only findings a reviewer would actually file as a ticket. Every row needs Severity × Confidence × Evidence × Effort. Every Critical and High row must reappear in §6 Substantial Problems. This is the single most important addition over older report versions — it reframes narrative into a register a PM can triage.
 
 Save to `reports/{project-name}_quality_assessment_{YYYY-MM-DD}.md` (create the `reports/` directory if needed). Use the repo's directory name as `{project-name}`, lowercased and kebab-cased. Use today's date for `{YYYY-MM-DD}` so each run produces a timestamped, side-by-side report instead of overwriting the previous one.
 
@@ -130,12 +192,14 @@ Do **not** grade any dimension you couldn't gather evidence for. Mark it `—` a
 
 Full template: `references/report-template.md`. At a high level:
 
-1. **Header table** — date, scope, author, generation method
-2. **Summary Stats** *(new)* — LOC, comment LOC, test LOC, test/code ratio, test coverage, commits in last 90 days, active contributors, primary languages
-3. **Executive Summary** — grade table across all 17 dimensions, plus a 3-4 sentence "bottom line"
-4. **What the app does — Operational Picture** — numbered data-flow walkthrough, including a "Disaster Recovery & Backups" subsection
-5. **Code Quality Findings** — one subsection per dimension with concrete evidence
-6. **Substantial Problems Worth Addressing** — concrete, numbered, with effort estimates
+0. **Header table** — date, scope, author (with plugin version), generation method
+0. **Method & Limitations** *(new in v0.3)* — mandatory block between Context and §1. States what the report is / is not, defines confidence levels (Verified / Likely / Inferred), reports dynamic-validation status, and reprints the grade rubric inline.
+1. **Summary Stats** — LOC, comment LOC, test LOC, test/code ratio, test-suite run (new), test coverage, commits in last 90 days, active contributors, primary languages
+2. **Executive Summary** — grade table across all 17 dimensions, plus a 3-4 sentence "bottom line"
+3. **What the app does — Operational Picture** — numbered data-flow walkthrough, including a "Disaster Recovery & Backups" subsection
+4. **Code Quality Findings** — one subsection per dimension with concrete evidence
+5. **Findings Register** *(new in v0.3)* — consolidated table with ID × Dimension × Finding × Severity × Confidence × Evidence × Effort. 10–25 rows.
+6. **Substantial Problems Worth Addressing** — concrete, numbered, with effort estimates. Every Critical and High row in §5 reappears here.
 7. **What's Notably Good** — patterns worth keeping, reusing, copying to other projects
 8. **Recommended Actions** — Immediate / Short term / Medium term buckets. Always include "Dependency Updates (Dependabot/Renovate)" in at least the short/medium term if not already in place.
 9. **Bottom Line** — one-paragraph verdict
@@ -147,7 +211,11 @@ Full template: `references/report-template.md`. At a high level:
 - Prefer quantified claims: "11 `capture_exception()` sites across 8,600 LOC", not "Sentry coverage is thin".
 - Use m-dashes sparingly. Prefer commas, periods, or colons.
 - Do not open with sycophancy. No "This is an impressive codebase!" — get to the substance.
-- Flag uncertainty explicitly: "Not verified", "Spot-checked only", "Based on 3 sampled files out of 47".
+- Flag uncertainty with one of three standard phrasings, matching the confidence levels in the Method & Limitations block and the §5 Findings Register:
+  - **Verified** (default) — no prefix needed, just cite `file:line`.
+  - **Likely** (spot-checked, one of many, strongly implied) — prefix with "Spot-checked:" or "Based on {N} sampled files of {M}:".
+  - **Inferred** (absence of evidence, grep returned nothing, config-derived) — prefix with "Inferred from {what}:" or "Not directly verified — {reason}.".
+  Use these three tags consistently. The Findings Register (§5) carries the machine-readable Confidence column; §4 prose uses the phrasings so narrative and register agree.
 - Do not invent features. If the repo has no frontend, the "frontend quality" grade is `—` with a one-line explanation.
 - Do not add emojis unless the repo itself uses them heavily.
 

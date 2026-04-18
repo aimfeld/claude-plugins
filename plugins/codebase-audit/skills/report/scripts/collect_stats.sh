@@ -228,6 +228,212 @@ if [[ ${FOUND_COV} -eq 0 ]]; then
   log "  (none found — coverage not measured locally; report as 'Not measured')"
 fi
 
+# ----- Test runner detection -----
+section "Test runner detection (for optional Step 2b — no tests are executed here)"
+TEST_RUNNER_FOUND=0
+
+# PHP — PHPUnit / Pest (config can be at root or in tests/)
+PHPUNIT_CONFIG=""
+for cfg in phpunit.xml phpunit.xml.dist tests/phpunit.xml tests/phpunit.xml.dist; do
+  if [[ -f "${REPO}/${cfg}" ]]; then
+    PHPUNIT_CONFIG="${cfg}"
+    break
+  fi
+done
+if [[ -n "${PHPUNIT_CONFIG}" ]]; then
+  if [[ -x "${REPO}/vendor/bin/phpunit" ]]; then
+    log "  php: ${PHPUNIT_CONFIG} + vendor/bin/phpunit present (deps installed)"
+  elif [[ -x "${REPO}/vendor/bin/pest" ]]; then
+    log "  php: ${PHPUNIT_CONFIG} + vendor/bin/pest present (deps installed)"
+  else
+    log "  php: ${PHPUNIT_CONFIG} present, but vendor/ missing — deps not installed (skip Step 2b)"
+  fi
+  TEST_RUNNER_FOUND=1
+fi
+
+# Python — pytest / unittest
+if [[ -f "${REPO}/pytest.ini" || -f "${REPO}/tox.ini" ]] || grep -q '\[tool\.pytest' "${REPO}/pyproject.toml" 2>/dev/null; then
+  PYTEST_BIN=""
+  [[ -x "${REPO}/.venv/bin/pytest" ]] && PYTEST_BIN="${REPO}/.venv/bin/pytest"
+  [[ -z "${PYTEST_BIN}" && -x "${REPO}/venv/bin/pytest" ]] && PYTEST_BIN="${REPO}/venv/bin/pytest"
+  [[ -z "${PYTEST_BIN}" ]] && command -v pytest >/dev/null 2>&1 && PYTEST_BIN="$(command -v pytest)"
+  if [[ -n "${PYTEST_BIN}" ]]; then
+    log "  python: pytest config + runner at ${PYTEST_BIN} (deps likely installed)"
+  else
+    log "  python: pytest config present, but pytest binary not found in .venv/venv/PATH (skip Step 2b)"
+  fi
+  TEST_RUNNER_FOUND=1
+fi
+
+# JavaScript / TypeScript — npm/yarn/pnpm test script
+if [[ -f "${REPO}/package.json" ]]; then
+  TEST_SCRIPT=$(grep -oE '"test"\s*:\s*"[^"]+"' "${REPO}/package.json" 2>/dev/null | head -1)
+  if [[ -n "${TEST_SCRIPT}" ]]; then
+    if [[ -d "${REPO}/node_modules" ]]; then
+      log "  js/ts: package.json ${TEST_SCRIPT} + node_modules/ present (deps installed)"
+    else
+      log "  js/ts: package.json ${TEST_SCRIPT} present, but node_modules/ missing (skip Step 2b)"
+    fi
+    TEST_RUNNER_FOUND=1
+  fi
+fi
+
+# Go — any *_test.go file
+if [[ -f "${REPO}/go.mod" ]]; then
+  GO_TEST_COUNT=$(find "${REPO}" -name '*_test.go' -not -path '*/vendor/*' -not -path '*/.git/*' 2>/dev/null | head -50 | wc -l)
+  if [[ "${GO_TEST_COUNT}" -gt 0 ]]; then
+    log "  go: go.mod + ${GO_TEST_COUNT}+ *_test.go files (go test always works, deps auto-resolved)"
+    TEST_RUNNER_FOUND=1
+  fi
+fi
+
+# Rust — Cargo.toml + tests/ or *#[cfg(test)]*
+if [[ -f "${REPO}/Cargo.toml" ]]; then
+  if [[ -d "${REPO}/tests" ]] || grep -rq '#\[cfg(test)\]' "${REPO}/src" 2>/dev/null; then
+    log "  rust: Cargo.toml + test modules present (cargo test handles deps)"
+    TEST_RUNNER_FOUND=1
+  fi
+fi
+
+# Ruby — Gemfile + spec/ or test/
+if [[ -f "${REPO}/Gemfile" ]]; then
+  if [[ -d "${REPO}/spec" || -d "${REPO}/test" ]]; then
+    if [[ -f "${REPO}/Gemfile.lock" ]]; then
+      log "  ruby: Gemfile + $(ls -d "${REPO}"/spec "${REPO}"/test 2>/dev/null | tr '\n' ' ')present (deps likely installed)"
+    else
+      log "  ruby: Gemfile + spec/test dir present, but no Gemfile.lock — run bundle install first"
+    fi
+    TEST_RUNNER_FOUND=1
+  fi
+fi
+
+# Java — Maven / Gradle with src/test/java/
+if [[ -d "${REPO}/src/test/java" ]]; then
+  if [[ -f "${REPO}/pom.xml" ]]; then
+    log "  java: pom.xml + src/test/java/ present (mvn test — requires Maven on PATH)"
+    TEST_RUNNER_FOUND=1
+  elif [[ -f "${REPO}/build.gradle" || -f "${REPO}/build.gradle.kts" ]]; then
+    log "  java: build.gradle + src/test/java/ present (gradle test — requires Gradle on PATH)"
+    TEST_RUNNER_FOUND=1
+  fi
+fi
+
+if [[ "${TEST_RUNNER_FOUND}" = "0" ]]; then
+  log "  (no recognized root-level test runner configuration detected)"
+fi
+
+# Monorepo / subdirectory scan — common on projects with separate frontend + backend
+log ""
+log "Subdirectory scan (depth ≤3, excluding node_modules/.venv/vendor/dist/build):"
+MONO_HITS=0
+
+# Nested package.json with a "test" script — catches React/Vue/Svelte subdirs like frontend/, web/, apps/*, packages/*
+while IFS= read -r pkg; do
+  [[ -z "${pkg}" ]] && continue
+  rel="${pkg#${REPO}/}"
+  [[ "${rel}" = "package.json" ]] && continue
+  TEST_SCRIPT=$(grep -oE '"test"\s*:\s*"[^"]+"' "${pkg}" 2>/dev/null | head -1)
+  if [[ -n "${TEST_SCRIPT}" ]]; then
+    dir="$(dirname "${rel}")"
+    if [[ -d "${REPO}/${dir}/node_modules" ]]; then
+      log "  js/ts: ${rel} ${TEST_SCRIPT} + ${dir}/node_modules/ present (deps installed)"
+    else
+      log "  js/ts: ${rel} ${TEST_SCRIPT} present, but ${dir}/node_modules/ missing"
+    fi
+    MONO_HITS=$((MONO_HITS + 1))
+  fi
+done < <(find "${REPO}" -maxdepth 3 -name package.json -not -path '*/node_modules/*' 2>/dev/null)
+
+# Nested phpunit.xml beyond root + tests/ (e.g., packages/X/phpunit.xml)
+while IFS= read -r cfg; do
+  [[ -z "${cfg}" ]] && continue
+  rel="${cfg#${REPO}/}"
+  case "${rel}" in
+    phpunit.xml|phpunit.xml.dist|tests/phpunit.xml|tests/phpunit.xml.dist) continue ;;
+  esac
+  dir="$(dirname "${rel}")"
+  if [[ -d "${REPO}/${dir}/vendor" ]]; then
+    log "  php: ${rel} + ${dir}/vendor/ present (deps installed)"
+  else
+    log "  php: ${rel} present (vendor status unknown)"
+  fi
+  MONO_HITS=$((MONO_HITS + 1))
+done < <(find "${REPO}" -maxdepth 3 \( -name phpunit.xml -o -name phpunit.xml.dist \) -not -path '*/vendor/*' 2>/dev/null)
+
+# Nested pyproject.toml with [tool.pytest] beyond root
+while IFS= read -r pyproj; do
+  [[ -z "${pyproj}" ]] && continue
+  rel="${pyproj#${REPO}/}"
+  [[ "${rel}" = "pyproject.toml" ]] && continue
+  if grep -q '\[tool\.pytest' "${pyproj}" 2>/dev/null; then
+    log "  python: ${rel} has [tool.pytest] (nested project)"
+    MONO_HITS=$((MONO_HITS + 1))
+  fi
+done < <(find "${REPO}" -maxdepth 3 -name pyproject.toml -not -path '*/.venv/*' 2>/dev/null)
+
+if [[ "${MONO_HITS}" = "0" ]]; then
+  log "  (no nested test configs found — project is single-module)"
+fi
+
+# ----- Test-command hints (for Claude to read when proposing commands in Step 2b) -----
+section "Test-command hints (for Step 2b orchestration — do NOT execute from this script)"
+
+# README sections mentioning test/testing/running-tests
+if [[ -f "${REPO}/README.md" ]]; then
+  README_TEST_LINES=$(grep -niE '^#+ *(running tests|testing|tests?|test coverage)' "${REPO}/README.md" 2>/dev/null | head -5)
+  if [[ -n "${README_TEST_LINES}" ]]; then
+    log "README.md test-related headings (Claude should read these lines for exact commands):"
+    echo "${README_TEST_LINES}" | sed 's/^/  /' | tee -a "${OUT}"
+  else
+    log "README.md: no explicit 'Running Tests' / 'Testing' section found"
+  fi
+fi
+
+# Makefile / justfile / Taskfile targets
+for taskfile in Makefile makefile justfile Taskfile.yml Taskfile.yaml; do
+  if [[ -f "${REPO}/${taskfile}" ]]; then
+    HITS=$(grep -niE '^(test|cover|coverage|check)[^:]*:' "${REPO}/${taskfile}" 2>/dev/null | head -10)
+    if [[ -n "${HITS}" ]]; then
+      log "${taskfile} test-like targets:"
+      echo "${HITS}" | sed 's/^/  /' | tee -a "${OUT}"
+    fi
+  fi
+done
+
+# pyproject.toml scripts ([tool.poe.tasks], [project.scripts])
+if [[ -f "${REPO}/pyproject.toml" ]]; then
+  POE_HITS=$(grep -niE '^(test|cov|coverage|check|ci) *=' "${REPO}/pyproject.toml" 2>/dev/null | head -10)
+  if [[ -n "${POE_HITS}" ]]; then
+    log "pyproject.toml script-like lines:"
+    echo "${POE_HITS}" | sed 's/^/  /' | tee -a "${OUT}"
+  fi
+fi
+
+# package.json scripts — root and nested
+while IFS= read -r pkg; do
+  [[ -z "${pkg}" ]] && continue
+  rel="${pkg#${REPO}/}"
+  # Extract script keys that look test-related (test, test:*, coverage, cov, ci, check)
+  SCRIPT_HITS=$(grep -oE '"(test|test:[a-z0-9_-]+|coverage|cov|ci|check|lint)"\s*:\s*"[^"]+"' "${pkg}" 2>/dev/null | head -15)
+  if [[ -n "${SCRIPT_HITS}" ]]; then
+    log "${rel} test-like scripts:"
+    echo "${SCRIPT_HITS}" | sed 's/^/  /' | tee -a "${OUT}"
+  fi
+done < <(find "${REPO}" -maxdepth 3 -name package.json -not -path '*/node_modules/*' 2>/dev/null)
+
+# composer.json scripts
+if [[ -f "${REPO}/composer.json" ]]; then
+  COMP_HITS=$(grep -oE '"(test|tests|coverage|check|ci|lint)"\s*:\s*"[^"]+"' "${REPO}/composer.json" 2>/dev/null | head -10)
+  if [[ -n "${COMP_HITS}" ]]; then
+    log "composer.json test-like scripts:"
+    echo "${COMP_HITS}" | sed 's/^/  /' | tee -a "${OUT}"
+  fi
+fi
+
+log ""
+log "(Claude: read the surfaced README sections, Makefile/Taskfile targets, and package.json scripts"
+log " before proposing commands to the user. Do NOT guess commands — use the ones the project documents.)"
+
 # ----- CI workflows -----
 section "CI workflows"
 if [[ -d "${REPO}/.github/workflows" ]]; then
