@@ -2,6 +2,19 @@
 
 All notable changes to the `codebase-audit` plugin are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] — 2026-04-18
+
+### Added
+- **Environment-tier verdict from `collect_stats.sh`.** The script now ends with a grep-able `ENVIRONMENT_TIER: warm|partial|cold` line plus per-signal flags (`SIGNAL_LOC_TOOL`, `SIGNAL_TEST_RUNNER_DETECTED`, `SIGNAL_TEST_DEPS_INSTALLED`) so the skill can tell whether the audit was run from a warm active-dev environment, a partially-equipped one, or a cold clone with no tooling — and branch accordingly. ([#8](https://github.com/aimfeld/claude-plugins/pull/8))
+- **Single install-or-skip decision (Step 2b.1a in `SKILL.md`).** When the environment tier is `partial`, the skill asks *once* whether to install missing deps, run only what's already runnable, or skip Step 2b entirely — quoting commands from the repo's own docs (README, Makefile, package.json scripts) rather than guessing. Replaces what would previously have been N per-suite permission prompts. ([#8](https://github.com/aimfeld/claude-plugins/pull/8))
+- **Section-level assessability vocabulary in the report template.** Method & Limitations block now distinguishes claim-level confidence (Verified / Likely / Inferred, unchanged) from section-level assessability (`Measured` / `Inferred from artifacts` / `Not assessable without setup`). Cold-clone reports degrade explicitly — §1 rows state what tooling would be needed to upgrade the row to Measured, and §5 caps the confidence of findings sourced from Not-assessable sections at Inferred. ([#8](https://github.com/aimfeld/claude-plugins/pull/8))
+
+### Fixed
+- **`collect_stats.sh` portability.** Added a bash 4+ version guard (fails loudly with a macOS-specific `brew install bash` hint instead of emitting a cryptic syntax error under bash 3.2). Output path now respects `$TMPDIR` for sandboxed/containerized environments. ([#8](https://github.com/aimfeld/claude-plugins/pull/8))
+- **`collect_stats.sh` backup-evidence grep.** Replaced the GNU-only `grep -rlI --exclude-dir=…` with a portable `find -prune … -print0 | xargs -0 grep -lEi` pipeline that works across GNU grep, BSD grep (macOS), and busybox. ([#8](https://github.com/aimfeld/claude-plugins/pull/8))
+- **`collect_stats.sh` test-LOC word-splitting.** Rewrote `for d in $(… | sort -u)` as `while IFS= read -r d; do …; done < <(…)` so test-directory paths containing spaces are counted correctly instead of silently skipped. ([#8](https://github.com/aimfeld/claude-plugins/pull/8))
+- **`collect_stats.sh` `gh run list` error masking.** Routed the `gh run list` call through a temp file and inspected its exit code via `PIPESTATUS`-equivalent pattern — previously `tee` masked `gh` failures behind its own success, silently producing an empty "no recent runs" result rather than telling the reader `gh` couldn't ask. ([#8](https://github.com/aimfeld/claude-plugins/pull/8))
+
 ## [0.3.0] — 2026-04-18
 
 ### Added
@@ -40,6 +53,7 @@ All notable changes to the `codebase-audit` plugin are documented here. Format f
 ### Added
 - Initial release: 16-dimension quality assessment skill with evidence-based grading and `file:line` citations.
 
+[0.4.0]: https://github.com/aimfeld/claude-plugins/releases/tag/codebase-audit-v0.4.0
 [0.3.0]: https://github.com/aimfeld/claude-plugins/releases/tag/codebase-audit-v0.3.0
 [0.2.1]: https://github.com/aimfeld/claude-plugins/releases/tag/codebase-audit-v0.2.1
 [0.2.0]: https://github.com/aimfeld/claude-plugins/releases/tag/codebase-audit-v0.2.0
