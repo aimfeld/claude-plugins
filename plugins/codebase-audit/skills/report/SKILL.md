@@ -45,6 +45,12 @@ If `tokei` is not installed, the script will ask whether to install it. Tokei gi
 
 Test coverage: the script looks for existing coverage artifacts (`.coverage`, `coverage.xml`, `lcov.info`, `coverage/coverage-summary.json`, `htmlcov/`, Go coverprofile, etc.). It does **not** run tests by itself — if no artifact exists, report coverage as "not measured" and proceed to Step 2b (optional test run) before falling back to "not measured".
 
+**Environment tier.** The script ends with an `ENVIRONMENT_TIER: warm|partial|cold` line plus per-signal flags (`SIGNAL_LOC_TOOL`, `SIGNAL_TEST_RUNNER_DETECTED`, `SIGNAL_TEST_DEPS_INSTALLED`). Read these before Step 2b — they decide the branch you take and the "Environment tier" row in the report's Method & Limitations block. The tiers:
+
+- **warm** — an LOC tool is on PATH AND at least one detected test runner has its deps installed. Run tests per suite with user approval.
+- **partial** — the environment is missing at least one capability (LOC tool absent, OR test runners detected but deps not installed, OR no test runners in a language where the audit usually has them). Ask the user *once* (Step 2b.1a below) whether to install, skip-but-run-what's-possible, or skip Step 2b entirely. Do not ask per suite.
+- **cold** — no LOC tool AND no runner with installed deps. Skip Step 2b; mark dynamic-validation rows in §1 as `Not assessable without setup` and name the missing tooling.
+
 ### 2b. Offer to run the test suite *(optional)*
 
 This step turns a pure-static report into one with dynamic-validation data points — one per test suite in the project. It is **opt-in per suite** — always ask the user first, and skip cleanly when dependencies are not installed or the project's test commands aren't discoverable.
@@ -60,6 +66,23 @@ Read these, in order, before proposing anything:
 3. The README sections the hints surfaced (e.g., "Running Tests", "Test Coverage") — read those lines in the README directly, don't paraphrase.
 4. For a Python project: whether `uv.lock` / `poetry.lock` / `Pipfile.lock` is present (influences the runner prefix: `uv run pytest` vs `.venv/bin/pytest` vs `poetry run pytest`).
 5. For a monorepo: treat each suite separately (e.g., backend `pytest`, frontend `vitest`). Each gets its own row in §1 and its own pass/fail + coverage number.
+
+#### Step 2b.1a — Environment-tier gate (one question, not per-suite)
+
+Before proposing individual suites, branch on `ENVIRONMENT_TIER` from the stats output. This consolidates what would otherwise be N install-or-skip prompts into a single decision — the audit stays a conversation, not an interrogation.
+
+- **`warm`** — deps are installed for at least one suite. Proceed directly to Step 2b.2 and ask per-suite Run/Skip as before. No consolidated question needed.
+
+- **`partial`** — at least one gap. Compose the install plan *from the repo's own docs* (the README "Running Tests" section the stats script surfaced, the Makefile / Taskfile target, the `package.json` script — **do not guess commands**), then ask the user once via `AskUserQuestion` with these options:
+  - **Install missing deps, then run tests** — list the exact commands you would run (e.g., `cd frontend && npm install`, `composer install`, `uv sync`). Cite the source of each command (README line, Makefile target, script name). If no documented command exists for a gap, say so and do not offer to install it.
+  - **Skip install, run only suites whose deps are already installed** — proceed to Step 2b.2 but silently mark the non-runnable suites as `Not executed (deps not installed)` in §1.
+  - **Skip Step 2b entirely** — mark all dynamic-validation rows as `Not executed (user declined)` and continue to Step 3.
+
+  If the user picks "Install", run the quoted commands (with permission) in the target repo, then re-run `collect_stats.sh` to refresh the tier — do not assume install succeeded, verify by reading the new tier line. If the re-run still reports `partial`, note which suites are still blocked and proceed with what's runnable.
+
+- **`cold`** — nothing dynamic can be measured. Skip Step 2b entirely. Mark every dynamic-validation row in §1 as `Not assessable without setup` with the tier reason (copy from `TIER_REASON` in the stats output). The Method & Limitations block's "Environment tier" row records this so the reader knows the audit's envelope up front.
+
+The single install-or-skip question is the only install prompt for the whole audit. Do not re-ask per suite in Step 2b.2.
 
 #### Step 2b.2 — Propose commands to the user
 
@@ -132,7 +155,7 @@ Use the exact structure in `references/report-template.md`. Fill each section wi
 
 **Author field.** Read `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` and substitute the `version` field into the Author row, producing e.g. `Claude (Opus 4.7) via the codebase-audit:report skill (v0.3.0)`. Every saved report must carry the plugin version so readers can tell which revision of the skill produced it.
 
-**Method & Limitations block.** Mandatory. Sits between the Context paragraph and §1 Summary Stats. Fill the "Dynamic validation" line based on whether Step 2b ran — pass/fail + coverage if it did, "No tests were run" otherwise. Do not paraphrase the grade rubric; copy it from the template verbatim so the ladder is consistent across reports.
+**Method & Limitations block.** Mandatory. Sits between the Context paragraph and §1 Summary Stats. Fill the "Dynamic validation" line based on whether Step 2b ran — pass/fail + coverage if it did, "No tests were run" otherwise. Also fill the "Environment tier" line by copying the `ENVIRONMENT_TIER` value and `TIER_REASON` from the stats output; for a `cold` or `partial` tier, this line tells the reader which rows in §1 are `Not assessable without setup` and why. Do not paraphrase the grade rubric; copy it from the template verbatim so the ladder is consistent across reports.
 
 **Findings Register (§5).** Mandatory. Populate with 10–25 rows drawn from §4 subsections — only findings a reviewer would actually file as a ticket. Every row needs Severity × Confidence × Evidence × Effort. Every Critical and High row must reappear in §6 Substantial Problems. This is the single most important addition over older report versions — it reframes narrative into a register a PM can triage.
 

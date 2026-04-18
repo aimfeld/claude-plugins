@@ -28,16 +28,27 @@ Save the filled-in report to `reports/{project-name}_quality_assessment_{YYYY-MM
 
 **What this is not.** Not a formal audit. No interviews with the development team. No legal or professional accountability. No ISO 25010 weighted-scoring methodology. No dynamic penetration testing or load testing. Use this as a first-pass engineering review, not as a substitute for an investor-grade or compliance-grade assessment.
 
-**Confidence levels.** Each finding in the §5 Findings Register is tagged with one of three confidence levels:
+**Confidence levels.** Each finding in the §5 Findings Register is tagged with one of three confidence levels (applies to individual *claims*):
 
 - **Verified** — claim backed by end-to-end reading of the cited file(s).
 - **Likely** — claim backed by spot-check of representative files, or strongly implied by configuration.
 - **Inferred** — claim backed by absence of contrary evidence (e.g., "no `.github/workflows/` found → no CI"). Inferred ≠ wrong, but is the most likely to miss something the repo's maintainers know that the static analysis cannot see.
 
+**Section assessability.** Each row in §1 Summary Stats carries one of three assessability tiers (applies to *whole sections* — a step above claim-level confidence):
+
+- **Measured** — we ran the tool or parsed the artifact (e.g., coverage artifact exists and was read; tests were executed).
+- **Inferred from artifacts** — we read configs and lockfiles but didn't execute anything (e.g., "Dependabot configured" from `.github/dependabot.yml` presence; "Maintainability-test design" from test-file shape without running them).
+- **Not assessable without setup** — the probe requires tooling or deps that aren't installed in this environment. State what *would* be needed to upgrade the row to Measured (e.g., "install `node_modules/` then re-run with `SIGNAL_TEST_DEPS_INSTALLED=yes`").
+
+A finding sourced from a "Not assessable" section must not exceed **Inferred** in §5.
+
+**Environment tier.** {Copy the `ENVIRONMENT_TIER` value and `TIER_REASON` from `collect_stats.sh` output — e.g., "warm — LOC tool on PATH and at least one test runner has its deps installed." / "partial — test runners detected but deps not installed." / "cold — no LOC tool on PATH and no test runner with installed deps." This line tells the reader which §1 rows will read as `Not assessable without setup`.}
+
 **Dynamic validation.** {One of:
 - "No tests were run; the Maintainability grade reflects static inspection of the test suite only."
 - "Backend suite: {N passed / M total}, coverage {X%}. Frontend suite: {N passed / M total}, coverage {X%}. Per-suite details in §1 Summary Stats. Results are separate from the Maintainability grade, which reflects test-suite design, not runtime pass/fail."
-- "Partial: backend suite run ({N/M, X%}); frontend suite skipped (deps not installed / user declined)." }
+- "Partial: backend suite run ({N/M, X%}); frontend suite skipped (deps not installed / user declined)."
+- "Not assessable without setup — environment is `cold`; no test runner has its deps installed." }
 
 **Grade rubric.** A = best-practice everywhere. B = solid with small known gaps. C = works but has real rough edges. D = risky, don't ship. F = broken or absent. `+` / `−` denote half-steps; a dimension drops one tier for each missing obvious element (no backups, no deps automation, etc.). See the §2 Executive Summary table for the per-dimension grades.
 
@@ -60,7 +71,7 @@ Save the filled-in report to `reports/{project-name}_quality_assessment_{YYYY-MM
 | Dependency manifests | {list, e.g., "pyproject.toml, package.json"} | — |
 | Lockfiles present | {Yes/Partial/No} | {e.g., "uv.lock + package-lock.json, both committed"} |
 
-If any row is `Not measured` or approximate, say why in the Notes column. Do not silently omit.
+If any row is not `Measured`, tag it explicitly with one of the three assessability tiers from the Method & Limitations block — `Measured`, `Inferred from artifacts`, or `Not assessable without setup` — and explain why in the Notes column. Do not silently omit. Rows that could not be reached because of a `cold` environment tier should read `Not assessable without setup (environment tier: cold)` so the reader immediately understands what a different environment would change.
 
 ---
 
@@ -222,7 +233,7 @@ If no frontend exists: `— N/A: backend-only service`.
 A consolidated, machine-readable view of every finding a reviewer would track. Rows are drawn from §4 subsections; this table exists so a reader can triage without reading the full narrative. High/Critical rows must reappear in §6 Substantial Problems; Medium/Low roll into §8 Recommended Actions.
 
 **Severity**: Critical = production-blocking or data-loss risk; High = likely to cause incidents within 3 months; Medium = real risk but bounded; Low = minor quality/hygiene.
-**Confidence** (from Method & Limitations block): Verified / Likely / Inferred.
+**Confidence** (from Method & Limitations block): Verified / Likely / Inferred. A finding whose source §1 row is `Not assessable without setup` must not exceed **Inferred** — if the audit couldn't measure it, downstream claims are at best inferential.
 **Effort**: ≤1h / half-day / 1d / >1d.
 
 | ID | Dimension | Finding | Severity | Confidence | Evidence | Effort |
@@ -284,7 +295,7 @@ N+1. ...
 ## Notes for the skill-runner
 
 - The **Author row** must include the plugin version. Read `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json`, pull the `version` field, and substitute into the Author cell as `Claude (Opus 4.7) via the \`codebase-audit:report\` skill (vX.Y.Z)`. This makes every saved report self-identifying.
-- The **Method & Limitations block** (between Context and §1) is mandatory. Fill the "Dynamic validation" bullet based on whether Step 2b ran: if tests were run, state pass/fail + coverage; if not, state "No tests were run."
+- The **Method & Limitations block** (between Context and §1) is mandatory. Fill the "Dynamic validation" bullet based on whether Step 2b ran: if tests were run, state pass/fail + coverage; if not, state "No tests were run." Also fill the "Environment tier" line by copying the `ENVIRONMENT_TIER` and `TIER_REASON` emitted by `collect_stats.sh` — every report must carry this so the reader can tell whether an empty row is a gap in the project or a gap in the environment that ran the audit.
 - The **Summary Stats** table (§1) is mandatory. "Test suite run" and "Test coverage" rows default to `Not executed` / `Not measured`; only populate with numbers when Step 2b ran successfully.
 - The **Disaster Recovery & Backups subsection** (§3) is mandatory. If you cannot find evidence of a backup strategy, say so explicitly — do not omit the subsection.
 - The **dimension grade table** (§2) must include all 17 dimensions, including the newer ones (12-17). Use `— N/A` with a reason for rows that don't apply to this project type.
