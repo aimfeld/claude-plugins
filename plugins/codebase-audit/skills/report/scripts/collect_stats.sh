@@ -5,7 +5,10 @@
 #   collect_stats.sh <repo-path>
 #
 # Produces human-readable output to stdout and writes the same to
-# /tmp/quality-assessment-stats.txt for the caller to reference.
+# ${TMPDIR:-/tmp}/quality-assessment-stats.txt for the caller to reference.
+#
+# Requires bash 4+. macOS ships with bash 3.2 as /bin/bash; the script
+# aborts loudly with an install hint if run under anything older.
 #
 # Sections:
 #   - Repo identity (name, branch, commit, remote)
@@ -14,14 +17,27 @@
 #   - Git activity (commits, contributors) for last 90 days
 #   - Dependency manifests + lockfile presence
 #   - Coverage artifact search
+#   - Test runner detection + test-command hints (for Step 2b orchestration)
 #   - CI workflow discovery + recent run timing (if gh is available)
 #   - Docker / deploy artifacts
 #   - Backup / restore evidence (grep only — does not assume tools)
+#   - Environment tier verdict (warm / partial / cold) — tells the skill
+#     whether dynamic validation (test execution) is viable and, if so,
+#     whether to consolidate missing-deps questions into one prompt
 #
 # The script is read-only on the target repo. It does not run tests
 # or install anything without asking.
 
 set -uo pipefail
+
+# Require bash 4+ (arrays with += append, `read -d ''`, nullglob used below).
+# macOS ships with bash 3.2 as /bin/bash; `brew install bash` provides a newer one.
+if ((${BASH_VERSINFO[0]:-0} < 4)); then
+  echo "error: collect_stats.sh requires bash 4+ (detected ${BASH_VERSION:-unknown})." >&2
+  echo "       On macOS, install with 'brew install bash' and re-run using" >&2
+  echo "       /opt/homebrew/bin/bash (Apple Silicon) or /usr/local/bin/bash (Intel)." >&2
+  exit 2
+fi
 
 REPO="${1:-}"
 if [[ -z "${REPO}" ]]; then
@@ -36,8 +52,14 @@ if [[ ! -d "${REPO}/.git" ]]; then
   echo "warning: '${REPO}' does not contain a .git directory — some stats will be missing" >&2
 fi
 
-OUT=/tmp/quality-assessment-stats.txt
+OUT="${TMPDIR:-/tmp}/quality-assessment-stats.txt"
 : > "${OUT}"
+
+# Tier-tracking flags. See the "Environment tier" section at the end of the script
+# for the final verdict. Signals are set as the respective sections run.
+HAS_LOC_TOOL=0
+TEST_RUNNER_DETECTED=0
+TEST_DEPS_INSTALLED=0
 
 log() {
   echo "$*" | tee -a "${OUT}"
@@ -71,6 +93,7 @@ elif command -v scc >/dev/null 2>&1; then
 elif command -v cloc >/dev/null 2>&1; then
   LOC_TOOL="cloc"
 fi
+[[ -n "${LOC_TOOL}" ]] && HAS_LOC_TOOL=1
 
 if [[ -z "${LOC_TOOL}" ]]; then
   log "tokei/scc/cloc not found on PATH."
@@ -138,7 +161,10 @@ else
   printf '%s\n' "${TEST_DIRS[@]}" | sort -u | tee -a "${OUT}"
   log ""
   log "Test LOC by directory (counting .py .ts .tsx .js .jsx .go .rs .java .rb .php .cs files):"
-  for d in $(printf '%s\n' "${TEST_DIRS[@]}" | sort -u); do
+  # `while read` instead of `for d in $(...)` so test-dir paths containing
+  # spaces don't get word-split across iterations.
+  while IFS= read -r d; do
+    [[ -z "${d}" ]] && continue
     full="${REPO}/${d}"
     [[ ! -d "${full}" ]] && continue
     loc=$(find "${full}" -type f \( \
@@ -152,7 +178,7 @@ else
       -o -name '*.rb' -o -name '*.php' -o -name '*.cs' \
       \) -not -path '*/node_modules/*' -not -path '*/.venv/*' | wc -l)
     printf '  %-50s %4d files / %6d LOC\n' "${d}" "${files}" "${loc}" | tee -a "${OUT}"
-  done
+  done < <(printf '%s\n' "${TEST_DIRS[@]}" | sort -u)
 fi
 
 # ----- Git activity -----
@@ -243,8 +269,10 @@ done
 if [[ -n "${PHPUNIT_CONFIG}" ]]; then
   if [[ -x "${REPO}/vendor/bin/phpunit" ]]; then
     log "  php: ${PHPUNIT_CONFIG} + vendor/bin/phpunit present (deps installed)"
+    TEST_DEPS_INSTALLED=1
   elif [[ -x "${REPO}/vendor/bin/pest" ]]; then
     log "  php: ${PHPUNIT_CONFIG} + vendor/bin/pest present (deps installed)"
+    TEST_DEPS_INSTALLED=1
   else
     log "  php: ${PHPUNIT_CONFIG} present, but vendor/ missing — deps not installed (skip Step 2b)"
   fi
@@ -259,6 +287,7 @@ if [[ -f "${REPO}/pytest.ini" || -f "${REPO}/tox.ini" ]] || grep -q '\[tool\.pyt
   [[ -z "${PYTEST_BIN}" ]] && command -v pytest >/dev/null 2>&1 && PYTEST_BIN="$(command -v pytest)"
   if [[ -n "${PYTEST_BIN}" ]]; then
     log "  python: pytest config + runner at ${PYTEST_BIN} (deps likely installed)"
+    TEST_DEPS_INSTALLED=1
   else
     log "  python: pytest config present, but pytest binary not found in .venv/venv/PATH (skip Step 2b)"
   fi
@@ -271,6 +300,7 @@ if [[ -f "${REPO}/package.json" ]]; then
   if [[ -n "${TEST_SCRIPT}" ]]; then
     if [[ -d "${REPO}/node_modules" ]]; then
       log "  js/ts: package.json ${TEST_SCRIPT} + node_modules/ present (deps installed)"
+      TEST_DEPS_INSTALLED=1
     else
       log "  js/ts: package.json ${TEST_SCRIPT} present, but node_modules/ missing (skip Step 2b)"
     fi
@@ -284,6 +314,7 @@ if [[ -f "${REPO}/go.mod" ]]; then
   if [[ "${GO_TEST_COUNT}" -gt 0 ]]; then
     log "  go: go.mod + ${GO_TEST_COUNT}+ *_test.go files (go test always works, deps auto-resolved)"
     TEST_RUNNER_FOUND=1
+    command -v go >/dev/null 2>&1 && TEST_DEPS_INSTALLED=1
   fi
 fi
 
@@ -292,6 +323,7 @@ if [[ -f "${REPO}/Cargo.toml" ]]; then
   if [[ -d "${REPO}/tests" ]] || grep -rq '#\[cfg(test)\]' "${REPO}/src" 2>/dev/null; then
     log "  rust: Cargo.toml + test modules present (cargo test handles deps)"
     TEST_RUNNER_FOUND=1
+    command -v cargo >/dev/null 2>&1 && TEST_DEPS_INSTALLED=1
   fi
 fi
 
@@ -300,6 +332,7 @@ if [[ -f "${REPO}/Gemfile" ]]; then
   if [[ -d "${REPO}/spec" || -d "${REPO}/test" ]]; then
     if [[ -f "${REPO}/Gemfile.lock" ]]; then
       log "  ruby: Gemfile + $(ls -d "${REPO}"/spec "${REPO}"/test 2>/dev/null | tr '\n' ' ')present (deps likely installed)"
+      TEST_DEPS_INSTALLED=1
     else
       log "  ruby: Gemfile + spec/test dir present, but no Gemfile.lock — run bundle install first"
     fi
@@ -312,9 +345,11 @@ if [[ -d "${REPO}/src/test/java" ]]; then
   if [[ -f "${REPO}/pom.xml" ]]; then
     log "  java: pom.xml + src/test/java/ present (mvn test — requires Maven on PATH)"
     TEST_RUNNER_FOUND=1
+    command -v mvn >/dev/null 2>&1 && TEST_DEPS_INSTALLED=1
   elif [[ -f "${REPO}/build.gradle" || -f "${REPO}/build.gradle.kts" ]]; then
     log "  java: build.gradle + src/test/java/ present (gradle test — requires Gradle on PATH)"
     TEST_RUNNER_FOUND=1
+    { command -v gradle >/dev/null 2>&1 || [[ -x "${REPO}/gradlew" ]]; } && TEST_DEPS_INSTALLED=1
   fi
 fi
 
@@ -337,6 +372,7 @@ while IFS= read -r pkg; do
     dir="$(dirname "${rel}")"
     if [[ -d "${REPO}/${dir}/node_modules" ]]; then
       log "  js/ts: ${rel} ${TEST_SCRIPT} + ${dir}/node_modules/ present (deps installed)"
+      TEST_DEPS_INSTALLED=1
     else
       log "  js/ts: ${rel} ${TEST_SCRIPT} present, but ${dir}/node_modules/ missing"
     fi
@@ -354,6 +390,7 @@ while IFS= read -r cfg; do
   dir="$(dirname "${rel}")"
   if [[ -d "${REPO}/${dir}/vendor" ]]; then
     log "  php: ${rel} + ${dir}/vendor/ present (deps installed)"
+    TEST_DEPS_INSTALLED=1
   else
     log "  php: ${rel} present (vendor status unknown)"
   fi
@@ -451,7 +488,20 @@ if command -v gh >/dev/null 2>&1 && [[ -d "${REPO}/.git" ]]; then
   if gh auth status >/dev/null 2>&1; then
     log ""
     log "Recent GitHub Actions runs (last 5, any workflow, main branch):"
-    (cd "${REPO}" && gh run list --branch main --limit 5 --json workflowName,status,conclusion,createdAt,updatedAt 2>/dev/null) | tee -a "${OUT}" || log "  (gh run list failed — not a GitHub repo or no auth)"
+    # Route through a temp file so we can inspect gh's exit code — piping to tee
+    # would mask gh failure behind tee's success and silently produce an empty
+    # result that reads as "no runs" rather than "gh couldn't ask".
+    GH_TMP="$(mktemp)"
+    if (cd "${REPO}" && gh run list --branch main --limit 5 --json workflowName,status,conclusion,createdAt,updatedAt >"${GH_TMP}" 2>/dev/null); then
+      if [[ -s "${GH_TMP}" ]]; then
+        tee -a "${OUT}" < "${GH_TMP}"
+      else
+        log "  (gh returned no runs for main — repo may have no CI history on this branch)"
+      fi
+    else
+      log "  (gh run list failed — not a GitHub repo, no auth, or network down)"
+    fi
+    rm -f "${GH_TMP}"
   else
     log "gh CLI present but not authenticated — skipping run-timing probe"
   fi
@@ -473,12 +523,18 @@ fi
 
 log ""
 log "Grep for backup/restore/dump evidence (excluding vendor/IDE/skill dirs):"
-BACKUP_HITS=$(grep -rlIiE 'pg_dump|mysqldump|mongodump|wal_?archive|restic|borg|rclone|s3 sync|storage[-_ ]box' \
-  --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=.venv \
-  --exclude-dir=dist --exclude-dir=build --exclude-dir=htmlcov \
-  --exclude-dir=.claude --exclude-dir=.idea --exclude-dir=.vscode \
-  --exclude-dir=.planning --exclude-dir=reports \
-  "${REPO}" 2>/dev/null | head -20)
+# `find ... -prune` + `xargs grep` instead of `grep -rlI --exclude-dir=...`
+# because the `-r` recursive mode and `--exclude-dir` flag aren't portable
+# across GNU grep, BSD grep (macOS), and busybox grep. The find+xargs form
+# works everywhere POSIX-ish.
+BACKUP_HITS=$(find "${REPO}" \
+    \( -path '*/.git' -o -path '*/node_modules' -o -path '*/.venv' \
+       -o -path '*/dist' -o -path '*/build' -o -path '*/htmlcov' \
+       -o -path '*/.claude' -o -path '*/.idea' -o -path '*/.vscode' \
+       -o -path '*/.planning' -o -path '*/reports' \) -prune \
+    -o -type f -print0 2>/dev/null \
+  | xargs -0 grep -lEi 'pg_dump|mysqldump|mongodump|wal_?archive|restic|borg|rclone|s3 sync|storage[-_ ]box' 2>/dev/null \
+  | head -20)
 if [[ -n "${BACKUP_HITS}" ]]; then
   echo "${BACKUP_HITS}" | tee -a "${OUT}"
 else
@@ -512,6 +568,45 @@ shopt -u nullglob
 if [[ "${IDE_HIT}" = "0" ]]; then
   log "  (no IDE-committed inspection profile / editor config found — team relies on per-contributor editor defaults)"
 fi
+
+# ----- Environment tier -----
+# Classify what this environment can actually measure, so the skill can pick
+# the right Step 2b branch: warm (run tests straight away), partial (ask once
+# whether to install missing deps), or cold (skip dynamic validation, report
+# dynamic rows as "Not assessable without setup").
+section "Environment tier"
+
+if [[ "${TEST_RUNNER_FOUND}" = "1" ]] || [[ "${MONO_HITS}" -gt 0 ]]; then
+  TEST_RUNNER_DETECTED=1
+fi
+
+if [[ "${HAS_LOC_TOOL}" = "1" ]] && [[ "${TEST_DEPS_INSTALLED}" = "1" ]]; then
+  TIER="warm"
+  TIER_REASON="LOC tool on PATH and at least one test runner has its deps installed."
+elif [[ "${HAS_LOC_TOOL}" = "1" ]] || [[ "${TEST_RUNNER_DETECTED}" = "1" ]]; then
+  TIER="partial"
+  MISSING=()
+  [[ "${HAS_LOC_TOOL}" = "0" ]] && MISSING+=("no LOC tool (tokei/scc/cloc)")
+  [[ "${TEST_RUNNER_DETECTED}" = "1" ]] && [[ "${TEST_DEPS_INSTALLED}" = "0" ]] \
+    && MISSING+=("test runners detected but deps not installed")
+  [[ "${TEST_RUNNER_DETECTED}" = "0" ]] && MISSING+=("no test runner configs detected")
+  TIER_REASON="partial — $(IFS='; '; printf '%s' "${MISSING[*]}")."
+else
+  TIER="cold"
+  TIER_REASON="no LOC tool on PATH and no test runner with installed deps."
+fi
+
+# Grep-able one-liner per signal. SKILL.md reads these to pick the Step 2b branch.
+log "ENVIRONMENT_TIER: ${TIER}"
+log "TIER_REASON: ${TIER_REASON}"
+log "SIGNAL_LOC_TOOL: $([[ "${HAS_LOC_TOOL}" = "1" ]] && echo yes || echo no)"
+log "SIGNAL_TEST_RUNNER_DETECTED: $([[ "${TEST_RUNNER_DETECTED}" = "1" ]] && echo yes || echo no)"
+log "SIGNAL_TEST_DEPS_INSTALLED: $([[ "${TEST_DEPS_INSTALLED}" = "1" ]] && echo yes || echo no)"
+log ""
+log "Tier meaning for the report skill:"
+log "  warm    — test execution is viable; offer it per-suite."
+log "  partial — one consolidated install-or-skip question before per-suite offers."
+log "  cold    — skip dynamic validation; mark Step-2b rows 'Not assessable without setup'."
 
 # ----- Done -----
 section "Done"
