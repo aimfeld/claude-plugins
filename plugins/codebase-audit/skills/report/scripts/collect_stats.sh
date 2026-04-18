@@ -228,6 +228,100 @@ if [[ ${FOUND_COV} -eq 0 ]]; then
   log "  (none found — coverage not measured locally; report as 'Not measured')"
 fi
 
+# ----- Test runner detection -----
+section "Test runner detection (for optional Step 2b — no tests are executed here)"
+TEST_RUNNER_FOUND=0
+
+# PHP — PHPUnit / Pest (config can be at root or in tests/)
+PHPUNIT_CONFIG=""
+for cfg in phpunit.xml phpunit.xml.dist tests/phpunit.xml tests/phpunit.xml.dist; do
+  if [[ -f "${REPO}/${cfg}" ]]; then
+    PHPUNIT_CONFIG="${cfg}"
+    break
+  fi
+done
+if [[ -n "${PHPUNIT_CONFIG}" ]]; then
+  if [[ -x "${REPO}/vendor/bin/phpunit" ]]; then
+    log "  php: ${PHPUNIT_CONFIG} + vendor/bin/phpunit present (deps installed)"
+  elif [[ -x "${REPO}/vendor/bin/pest" ]]; then
+    log "  php: ${PHPUNIT_CONFIG} + vendor/bin/pest present (deps installed)"
+  else
+    log "  php: ${PHPUNIT_CONFIG} present, but vendor/ missing — deps not installed (skip Step 2b)"
+  fi
+  TEST_RUNNER_FOUND=1
+fi
+
+# Python — pytest / unittest
+if [[ -f "${REPO}/pytest.ini" || -f "${REPO}/tox.ini" ]] || grep -q '\[tool\.pytest' "${REPO}/pyproject.toml" 2>/dev/null; then
+  PYTEST_BIN=""
+  [[ -x "${REPO}/.venv/bin/pytest" ]] && PYTEST_BIN="${REPO}/.venv/bin/pytest"
+  [[ -z "${PYTEST_BIN}" && -x "${REPO}/venv/bin/pytest" ]] && PYTEST_BIN="${REPO}/venv/bin/pytest"
+  [[ -z "${PYTEST_BIN}" ]] && command -v pytest >/dev/null 2>&1 && PYTEST_BIN="$(command -v pytest)"
+  if [[ -n "${PYTEST_BIN}" ]]; then
+    log "  python: pytest config + runner at ${PYTEST_BIN} (deps likely installed)"
+  else
+    log "  python: pytest config present, but pytest binary not found in .venv/venv/PATH (skip Step 2b)"
+  fi
+  TEST_RUNNER_FOUND=1
+fi
+
+# JavaScript / TypeScript — npm/yarn/pnpm test script
+if [[ -f "${REPO}/package.json" ]]; then
+  TEST_SCRIPT=$(grep -oE '"test"\s*:\s*"[^"]+"' "${REPO}/package.json" 2>/dev/null | head -1)
+  if [[ -n "${TEST_SCRIPT}" ]]; then
+    if [[ -d "${REPO}/node_modules" ]]; then
+      log "  js/ts: package.json ${TEST_SCRIPT} + node_modules/ present (deps installed)"
+    else
+      log "  js/ts: package.json ${TEST_SCRIPT} present, but node_modules/ missing (skip Step 2b)"
+    fi
+    TEST_RUNNER_FOUND=1
+  fi
+fi
+
+# Go — any *_test.go file
+if [[ -f "${REPO}/go.mod" ]]; then
+  GO_TEST_COUNT=$(find "${REPO}" -name '*_test.go' -not -path '*/vendor/*' -not -path '*/.git/*' 2>/dev/null | head -50 | wc -l)
+  if [[ "${GO_TEST_COUNT}" -gt 0 ]]; then
+    log "  go: go.mod + ${GO_TEST_COUNT}+ *_test.go files (go test always works, deps auto-resolved)"
+    TEST_RUNNER_FOUND=1
+  fi
+fi
+
+# Rust — Cargo.toml + tests/ or *#[cfg(test)]*
+if [[ -f "${REPO}/Cargo.toml" ]]; then
+  if [[ -d "${REPO}/tests" ]] || grep -rq '#\[cfg(test)\]' "${REPO}/src" 2>/dev/null; then
+    log "  rust: Cargo.toml + test modules present (cargo test handles deps)"
+    TEST_RUNNER_FOUND=1
+  fi
+fi
+
+# Ruby — Gemfile + spec/ or test/
+if [[ -f "${REPO}/Gemfile" ]]; then
+  if [[ -d "${REPO}/spec" || -d "${REPO}/test" ]]; then
+    if [[ -f "${REPO}/Gemfile.lock" ]]; then
+      log "  ruby: Gemfile + $(ls -d "${REPO}"/spec "${REPO}"/test 2>/dev/null | tr '\n' ' ')present (deps likely installed)"
+    else
+      log "  ruby: Gemfile + spec/test dir present, but no Gemfile.lock — run bundle install first"
+    fi
+    TEST_RUNNER_FOUND=1
+  fi
+fi
+
+# Java — Maven / Gradle with src/test/java/
+if [[ -d "${REPO}/src/test/java" ]]; then
+  if [[ -f "${REPO}/pom.xml" ]]; then
+    log "  java: pom.xml + src/test/java/ present (mvn test — requires Maven on PATH)"
+    TEST_RUNNER_FOUND=1
+  elif [[ -f "${REPO}/build.gradle" || -f "${REPO}/build.gradle.kts" ]]; then
+    log "  java: build.gradle + src/test/java/ present (gradle test — requires Gradle on PATH)"
+    TEST_RUNNER_FOUND=1
+  fi
+fi
+
+if [[ "${TEST_RUNNER_FOUND}" = "0" ]]; then
+  log "  (no recognized test runner configuration detected — Step 2b will skip)"
+fi
+
 # ----- CI workflows -----
 section "CI workflows"
 if [[ -d "${REPO}/.github/workflows" ]]; then

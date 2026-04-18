@@ -43,7 +43,33 @@ The script writes a machine-readable summary to `/tmp/quality-assessment-stats.t
 
 If `tokei` is not installed, the script will ask whether to install it. Tokei gives accurate LOC with code/comment/blank split across languages; the fallback (`git ls-files` + `wc -l`) only gives a rough total. If the user declines, report stats as "approximate".
 
-Test coverage: the script looks for existing coverage artifacts (`.coverage`, `coverage.xml`, `lcov.info`, `coverage/coverage-summary.json`, `htmlcov/`, Go coverprofile, etc.). It does **not** run tests — if no artifact exists, report coverage as "not measured" and recommend running coverage as a follow-up. Do not silently omit the coverage row.
+Test coverage: the script looks for existing coverage artifacts (`.coverage`, `coverage.xml`, `lcov.info`, `coverage/coverage-summary.json`, `htmlcov/`, Go coverprofile, etc.). It does **not** run tests by itself — if no artifact exists, report coverage as "not measured" and proceed to Step 2b (optional test run) before falling back to "not measured".
+
+### 2b. Offer to run the test suite *(optional)*
+
+This step turns a pure-static report into one with a dynamic-validation data point, which is one of the cheapest ways to strengthen the report. It is **opt-in per run** — always ask the user first, and skip cleanly when dependencies are not installed.
+
+After `collect_stats.sh` finishes, read its "Test runner detection" section. If a runner is detected and its dependencies appear installed, ask the user one question:
+
+> "Detected `{runner}` with dependencies installed. Run the test suite and measure coverage? (y/N — default skip)"
+
+**Run only if the user confirms.** Then:
+
+1. Run the test command for the detected runner (e.g., `vendor/bin/phpunit`, `.venv/bin/pytest --cov`, `npm test`, `go test ./...`, `cargo test`).
+2. **Time-box to 5 minutes.** Use `timeout 300 …` or equivalent. If the suite runs longer, abort and report "Timed out after 5 min".
+3. Capture: total tests, passed, failed, skipped, duration, and coverage % if the runner emits it (pytest-cov, phpunit-coverage, go test -cover, jest --coverage, nyc).
+4. **Before and after the run, confirm the working tree is clean** (`git -C {repo} status --porcelain`). If tests modified source files, discard the run results and note it in the report as "test suite appeared to modify the working tree — results discarded, rerun manually".
+5. Write the results into:
+   - §1 Summary Stats table — "Test suite run" row and "Test coverage" row.
+   - Method & Limitations block — replace the "No tests were run" line with "Test suite was executed: {N passed / M total}, coverage {X%}".
+   - The Method cell in the header table — replace "No tests were run." with "Test suite run; {passed/total} passed, coverage {X%} — see §1."
+
+**Hard rules:**
+
+- **Never install dependencies.** If the detection said deps are missing, skip this step silently and keep "Not measured" in §1.
+- **Never modify the target repo.** The git-status check before and after is the guard.
+- **Never use test results to override the Maintainability grade.** That grade is about test-suite design (coverage, integration vs unit, CI gating); pass/fail is a separate, empirical data point reported alongside.
+- If declined, skipped, or errored: report coverage as "Not measured" and add "No tests were run." to the Method & Limitations block. Proceed to Step 3.
 
 ### 3. Survey operational context
 
@@ -73,6 +99,12 @@ Per-language probes (what to grep for, which config files, which tools are idiom
 ### 5. Write the report
 
 Use the exact structure in `references/report-template.md`. Fill each section with findings from step 4, citing file:line. Do not invent sections the template does not have, and do not skip sections (if a section doesn't apply, say so explicitly with one sentence).
+
+**Author field.** Read `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` and substitute the `version` field into the Author row, producing e.g. `Claude (Opus 4.7) via the codebase-audit:report skill (v0.3.0)`. Every saved report must carry the plugin version so readers can tell which revision of the skill produced it.
+
+**Method & Limitations block.** Mandatory. Sits between the Context paragraph and §1 Summary Stats. Fill the "Dynamic validation" line based on whether Step 2b ran — pass/fail + coverage if it did, "No tests were run" otherwise. Do not paraphrase the grade rubric; copy it from the template verbatim so the ladder is consistent across reports.
+
+**Findings Register (§5).** Mandatory. Populate with 10–25 rows drawn from §4 subsections — only findings a reviewer would actually file as a ticket. Every row needs Severity × Confidence × Evidence × Effort. Every Critical and High row must reappear in §6 Substantial Problems. This is the single most important addition over older report versions — it reframes narrative into a register a PM can triage.
 
 Save to `reports/{project-name}_quality_assessment_{YYYY-MM-DD}.md` (create the `reports/` directory if needed). Use the repo's directory name as `{project-name}`, lowercased and kebab-cased. Use today's date for `{YYYY-MM-DD}` so each run produces a timestamped, side-by-side report instead of overwriting the previous one.
 
@@ -130,12 +162,14 @@ Do **not** grade any dimension you couldn't gather evidence for. Mark it `—` a
 
 Full template: `references/report-template.md`. At a high level:
 
-1. **Header table** — date, scope, author, generation method
-2. **Summary Stats** *(new)* — LOC, comment LOC, test LOC, test/code ratio, test coverage, commits in last 90 days, active contributors, primary languages
-3. **Executive Summary** — grade table across all 17 dimensions, plus a 3-4 sentence "bottom line"
-4. **What the app does — Operational Picture** — numbered data-flow walkthrough, including a "Disaster Recovery & Backups" subsection
-5. **Code Quality Findings** — one subsection per dimension with concrete evidence
-6. **Substantial Problems Worth Addressing** — concrete, numbered, with effort estimates
+0. **Header table** — date, scope, author (with plugin version), generation method
+0. **Method & Limitations** *(new in v0.3)* — mandatory block between Context and §1. States what the report is / is not, defines confidence levels (Verified / Likely / Inferred), reports dynamic-validation status, and reprints the grade rubric inline.
+1. **Summary Stats** — LOC, comment LOC, test LOC, test/code ratio, test-suite run (new), test coverage, commits in last 90 days, active contributors, primary languages
+2. **Executive Summary** — grade table across all 17 dimensions, plus a 3-4 sentence "bottom line"
+3. **What the app does — Operational Picture** — numbered data-flow walkthrough, including a "Disaster Recovery & Backups" subsection
+4. **Code Quality Findings** — one subsection per dimension with concrete evidence
+5. **Findings Register** *(new in v0.3)* — consolidated table with ID × Dimension × Finding × Severity × Confidence × Evidence × Effort. 10–25 rows.
+6. **Substantial Problems Worth Addressing** — concrete, numbered, with effort estimates. Every Critical and High row in §5 reappears here.
 7. **What's Notably Good** — patterns worth keeping, reusing, copying to other projects
 8. **Recommended Actions** — Immediate / Short term / Medium term buckets. Always include "Dependency Updates (Dependabot/Renovate)" in at least the short/medium term if not already in place.
 9. **Bottom Line** — one-paragraph verdict
@@ -147,7 +181,11 @@ Full template: `references/report-template.md`. At a high level:
 - Prefer quantified claims: "11 `capture_exception()` sites across 8,600 LOC", not "Sentry coverage is thin".
 - Use m-dashes sparingly. Prefer commas, periods, or colons.
 - Do not open with sycophancy. No "This is an impressive codebase!" — get to the substance.
-- Flag uncertainty explicitly: "Not verified", "Spot-checked only", "Based on 3 sampled files out of 47".
+- Flag uncertainty with one of three standard phrasings, matching the confidence levels in the Method & Limitations block and the §5 Findings Register:
+  - **Verified** (default) — no prefix needed, just cite `file:line`.
+  - **Likely** (spot-checked, one of many, strongly implied) — prefix with "Spot-checked:" or "Based on {N} sampled files of {M}:".
+  - **Inferred** (absence of evidence, grep returned nothing, config-derived) — prefix with "Inferred from {what}:" or "Not directly verified — {reason}.".
+  Use these three tags consistently. The Findings Register (§5) carries the machine-readable Confidence column; §4 prose uses the phrasings so narrative and register agree.
 - Do not invent features. If the repo has no frontend, the "frontend quality" grade is `—` with a one-line explanation.
 - Do not add emojis unless the repo itself uses them heavily.
 
