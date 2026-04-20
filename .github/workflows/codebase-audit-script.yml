@@ -1,8 +1,10 @@
-name: codebase-audit collect_stats.sh smoke test
+name: codebase-audit stats
 
 # macOS runners ship stock /bin/bash 3.2.57 — the exact shell that motivated
 # issue #9. Invoking the script under /bin/bash here guards against anyone
-# accidentally reintroducing a bash-4-only construct.
+# accidentally reintroducing a bash-4-only construct. The weekly cron keeps
+# the README badge fresh and catches runner-image regressions (gh CLI
+# changes, toolchain updates) even when the script itself hasn't changed.
 
 on:
   push:
@@ -14,6 +16,9 @@ on:
     paths:
       - 'plugins/codebase-audit/skills/report/scripts/collect_stats.sh'
       - '.github/workflows/codebase-audit-script.yml'
+  schedule:
+    - cron: '0 6 * * 1'  # Mondays 06:00 UTC
+  workflow_dispatch:
 
 jobs:
   smoke-test:

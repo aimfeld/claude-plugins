@@ -1,5 +1,7 @@
 # codebase-audit
 
+[![stats script CI](https://github.com/aimfeld/claude-plugins/actions/workflows/codebase-audit-script.yml/badge.svg?branch=main)](https://github.com/aimfeld/claude-plugins/actions/workflows/codebase-audit-script.yml)
+
 A [Claude Code](https://www.claude.com/product/claude-code) plugin that produces a thorough, evidence-based software quality assessment for any git repository — architecture, security, database design, observability, testing, disaster recovery, GDPR, dependency management, frontend bundle performance, and CI/CD speed.
 
 Every grade and finding is backed by a concrete `file:line` pointer so a reviewer can verify any claim in under a minute.
