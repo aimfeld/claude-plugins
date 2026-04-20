@@ -7,8 +7,7 @@
 # Produces human-readable output to stdout and writes the same to
 # ${TMPDIR:-/tmp}/quality-assessment-stats.txt for the caller to reference.
 #
-# Requires bash 4+. macOS ships with bash 3.2 as /bin/bash; the script
-# aborts loudly with an install hint if run under anything older.
+# Runs under bash 3.2+ so stock macOS /bin/bash works without Homebrew bash.
 #
 # Sections:
 #   - Repo identity (name, branch, commit, remote)
@@ -29,15 +28,6 @@
 # or install anything without asking.
 
 set -uo pipefail
-
-# Require bash 4+ (arrays with += append, `read -d ''`, nullglob used below).
-# macOS ships with bash 3.2 as /bin/bash; `brew install bash` provides a newer one.
-if ((${BASH_VERSINFO[0]:-0} < 4)); then
-  echo "error: collect_stats.sh requires bash 4+ (detected ${BASH_VERSION:-unknown})." >&2
-  echo "       On macOS, install with 'brew install bash' and re-run using" >&2
-  echo "       /opt/homebrew/bin/bash (Apple Silicon) or /usr/local/bin/bash (Intel)." >&2
-  exit 2
-fi
 
 REPO="${1:-}"
 if [[ -z "${REPO}" ]]; then

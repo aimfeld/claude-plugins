@@ -1,0 +1,37 @@
+name: codebase-audit collect_stats.sh smoke test
+
+# macOS runners ship stock /bin/bash 3.2.57 — the exact shell that motivated
+# issue #9. Invoking the script under /bin/bash here guards against anyone
+# accidentally reintroducing a bash-4-only construct.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'plugins/codebase-audit/skills/report/scripts/collect_stats.sh'
+      - '.github/workflows/codebase-audit-script.yml'
+  pull_request:
+    paths:
+      - 'plugins/codebase-audit/skills/report/scripts/collect_stats.sh'
+      - '.github/workflows/codebase-audit-script.yml'
+
+jobs:
+  smoke-test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show bash version
+        run: /bin/bash --version
+
+      - name: Run collect_stats.sh under stock /bin/bash
+        run: /bin/bash plugins/codebase-audit/skills/report/scripts/collect_stats.sh "$GITHUB_WORKSPACE"
+
+      - name: Assert output file exists and contains expected sections
+        run: |
+          OUT="${TMPDIR:-/tmp}/quality-assessment-stats.txt"
+          test -s "$OUT" || { echo "output file missing or empty: $OUT" >&2; exit 1; }
+          for header in "=== Identity ===" "=== LOC breakdown ===" "=== Git activity" "=== Environment tier ===" "ENVIRONMENT_TIER:"; do
+            grep -qF "$header" "$OUT" || { echo "missing expected marker: $header" >&2; exit 1; }
+          done
+          echo "All expected markers present."

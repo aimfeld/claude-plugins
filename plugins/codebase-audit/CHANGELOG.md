@@ -2,6 +2,14 @@
 
 All notable changes to the `codebase-audit` plugin are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.4.1] — 2026-04-20
+
+### Fixed
+- **`collect_stats.sh` runs under stock macOS `/bin/bash` (3.2.57).** Dropped the bash 4+ version guard added in 0.4.0 — the script only uses features present in bash 3.2 (`+=` array append landed in 3.1, `read -d ''` in 2.05b, `nullglob` in 2.02), so the guard was fencing off a shell that actually works. Users who hadn't `brew install bash`'d were hitting a hard `exit 2` on the first step of `/codebase-audit:report`. Closes [#9](https://github.com/aimfeld/claude-plugins/issues/9). ([#10](https://github.com/aimfeld/claude-plugins/pull/10))
+
+### Added
+- **GitHub Actions smoke test for `collect_stats.sh`.** New `macos-latest` workflow (`.github/workflows/codebase-audit-script.yml`) runs the script under stock `/bin/bash 3.2.57` on every push/PR that touches the script, asserting exit 0 and that the expected section headers appear in the stats file. Locks in bash-3.2 compatibility so a future edit can't silently regress it. First CI workflow in this repo. ([#10](https://github.com/aimfeld/claude-plugins/pull/10))
+
 ## [0.4.0] — 2026-04-18
 
 ### Added
@@ -53,6 +61,7 @@ All notable changes to the `codebase-audit` plugin are documented here. Format f
 ### Added
 - Initial release: 16-dimension quality assessment skill with evidence-based grading and `file:line` citations.
 
+[0.4.1]: https://github.com/aimfeld/claude-plugins/releases/tag/codebase-audit-v0.4.1
 [0.4.0]: https://github.com/aimfeld/claude-plugins/releases/tag/codebase-audit-v0.4.0
 [0.3.0]: https://github.com/aimfeld/claude-plugins/releases/tag/codebase-audit-v0.3.0
 [0.2.1]: https://github.com/aimfeld/claude-plugins/releases/tag/codebase-audit-v0.2.1
