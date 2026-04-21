@@ -53,9 +53,18 @@ Read only the sections for dimensions you're currently assessing. You do not nee
 
 **Question:** When something goes wrong, will the maintainer know, and will they have enough context to debug?
 
+**Canonical probes (run verbatim — different greps give different counts, which makes re-audits look like the code changed when it didn't):**
+
+- Python bare excepts (files): `rg -l '^\s*except\s*:\s*(#.*)?$' -t py --glob '!tests/**' --glob '!test/**' --glob '!__tests__/**' --glob '!fixtures/**' --glob '!reports/**' | wc -l`
+- Python bare excepts (total sites): `rg -c '^\s*except\s*:\s*(#.*)?$' -t py --glob '!tests/**' --glob '!test/**' --glob '!__tests__/**' --glob '!fixtures/**' --glob '!reports/**' | awk -F: '{s+=$NF} END {print s+0}'`
+- JS/TS empty catches (files): `rg -l 'catch\s*\([^)]*\)\s*\{\s*\}' -t ts -t tsx -t js -t jsx --glob '!node_modules/**' --glob '!tests/**' --glob '!__tests__/**' --glob '!reports/**' | wc -l`
+- Go error-dropping `_ =` (rough): `rg -c '_\s*=\s*[a-zA-Z_][a-zA-Z0-9_.]*\(' -t go --glob '!vendor/**' --glob '!*_test.go' | awk -F: '{s+=$NF} END {print s+0}'` — this is a *signal* for dropped error returns, read a sample to confirm.
+
+Report the exact numbers these commands produce; if you diverge from them (e.g., to include tests or use a different pattern), say so and say why.
+
 **Probes:**
+- Run the canonical probes above. Report counts.
 - Grep for `capture_exception`, `Sentry.captureException`, `logger.error`, `panic`, `rescue`. Count sites. Divide by total LOC for a rough density.
-- Grep for bare `except:` / `catch (e)` / `catch { }` — any found should be called out.
 - Check retry loops: do they capture on every attempt (noisy) or only the final failure (correct)?
 - Check whether error messages embed variable data (fragments Sentry grouping) vs use `set_context` / `set_tag`.
 - Frontend: global error handlers on `QueryCache`, `MutationCache`, `window.onerror`, `unhandledrejection`.
@@ -78,8 +87,23 @@ Read only the sections for dimensions you're currently assessing. You do not nee
 
 **Question:** Is there anything in the repo that should be rotated?
 
+### Quarantine rule (non-negotiable)
+
+Any path listed in `CREDENTIAL_FILES_HIGH_CONFIDENCE` or `CREDENTIAL_FILES_REVIEW` in the stats output is **read-forbidden** for the remainder of this audit. Do not call `Read`, `cat`, `head`, `tail`, or any tool that emits file contents on those paths. The bash-produced classification label is the only signal you use. The report cites the path, never the body. The purpose is simple: secret bytes must not enter the LLM context — once they're in context they can be logged, cached, or echoed back, and that risk is unacceptable for passwords, private keys, and env-var values.
+
+When running the content greps in Probe 1 below, **exclude every entry in `CREDENTIAL_FILES_HIGH_CONFIDENCE` and `CREDENTIAL_FILES_REVIEW`** via `:(exclude)<path>` pathspecs (for `git grep`) or `--exclude=<path>` (for `grep`/`rg`). Without these exclusions, a committed `.env` or credential JSON would match `API_KEY=` / `-----BEGIN` / `"client_secret"` and leak the *value* through the grep output. The quarantine is what prevents that.
+
 **Probes:**
-- `git grep` for common secret patterns: `API_KEY`, `SECRET_KEY`, `PASSWORD`, `TOKEN`, `AWS_`, `sk-`, `xoxb-`, `ghp_`, `-----BEGIN`, `postgres://`, `mysql://`. **Exclude `reports/`, `.planning/`, `docs/`, `.claude/`, and `.idea/`** from these greps — the report this skill writes lives in `reports/`, and prior reports will contain literal pattern strings that self-match on re-runs. Use `--exclude-dir=reports --exclude-dir=.planning --exclude-dir=docs --exclude-dir=.claude --exclude-dir=.idea` (or the `git grep` equivalent).
+
+- **Probe 0 — consult `CREDENTIAL_FILES_HIGH_CONFIDENCE` and `CREDENTIAL_FILES_REVIEW` from the stats output.** The bash script has already classified each file using silent content-free probes (`grep -q` on PEM headers and JSON key names). Treat the labels as authoritative:
+  - **HIGH_CONFIDENCE hits.** Real secret by default — the filename/directory convention is canonical. No content inspection needed, ever. Flag as Critical. Labels you'll see: `real-oauth-client-secret`, `real-gcp-service-account`, `ssh-private-key`, `kubeconfig`, `env-file`, `credential-dir-file`, `credential-file`.
+  - **REVIEW hits** with `real-*` label (`real-private-key`, `real-private-key-encrypted`, `real-gcp-service-account`, `real-oauth-client-secret`, `real-aws-credentials`, `real-htpasswd`) → real secret. Flag as Critical.
+  - **REVIEW hits** with `binary-keystore-not-inspected` label → treat as real secret by default (a committed `.pfx`/`.p12`/`.jks` outside a fixture path is almost always a real keystore).
+  - **REVIEW hits** with `public-cert-ignore` / `public-key-ignore` / `csr-public-ignore` → public material, not a grade-floor trigger. Mention only if the public material shouldn't be in the source tree (e.g., a production CA bundle that should ship in the container image).
+  - **REVIEW hits** with `unclassified` label → cite the path, flag for human review, **do not read the file**, do not grade-floor. The label means the bash probe couldn't identify the shape; a human should open it in a scratch buffer outside the audit.
+  - **Report format per hit:** cite the path. If the path itself contains a token-shaped component (e.g., `client_secret_<TOKEN>.json`), redact the token component as `<REDACTED-TOKEN>` in §4 prose; the full path stays in the §5 Evidence column so the maintainer can locate the file.
+
+- **Probe 1 — `git grep` for common secret patterns** in source code (credential files are already handled by Probe 0, and **must be excluded from this grep** per the Quarantine rule): `API_KEY`, `SECRET_KEY`, `PASSWORD`, `TOKEN`, `AWS_`, `sk-`, `xoxb-`, `ghp_`, `-----BEGIN`, `postgres://`, `mysql://`. **Also exclude `reports/`, `.planning/`, `docs/`, `.claude/`, and `.idea/`** — prior reports will contain literal pattern strings that self-match on re-runs. Use `--exclude-dir=reports --exclude-dir=.planning --exclude-dir=docs --exclude-dir=.claude --exclude-dir=.idea` plus a `:(exclude)<path>` pathspec for every `CREDENTIAL_FILES_*` entry (or the `grep`/`rg` equivalent).
 - Check `.env*` files are in `.gitignore` and not tracked (`git ls-files | grep -E '\.env'`).
 - Look for the config loader (e.g., Pydantic `BaseSettings`, `dotenv`, `viper`, `node-config`). Confirm defaults are placeholders (`change-me`, `localhost`) not real values.
 - Check `Dockerfile` for `ARG`-baked credentials, `ENV` with real values.
@@ -95,6 +119,10 @@ Read only the sections for dimensions you're currently assessing. You do not nee
 - `.env` committed.
 - Dockerfile bakes credentials at build time.
 
+**Grade floor (supersedes all positive signals in this dimension):**
+- **Any** `CREDENTIAL_FILES_HIGH_CONFIDENCE` hit, or any `CREDENTIAL_FILES_REVIEW` hit whose bash-emitted label starts with `real-` or is `binary-keystore-not-inspected` → Secrets dimension **cannot exceed D** until the file is rotated (treat it as compromised), the git history is filtered (`git filter-repo` or equivalent), and the path is added to `.gitignore`. This is a hard floor: even if every other probe in this dimension looks clean, a tracked credential file holds the grade at D. Cite the floor explicitly in the §4.4 finding.
+- Labels `public-cert-ignore`, `public-key-ignore`, `csr-public-ignore`, and `unclassified` are **not** grade-floor triggers.
+
 If you find anything that could be a real secret, redact it in the report (`<REDACTED: pattern match>`) and flag it as immediate-action.
 
 ---
@@ -103,8 +131,15 @@ If you find anything that could be a real secret, redact it in the report (`<RED
 
 **Question:** Is the codebase living in the present, or are there ghost rooms?
 
+**Canonical probes (run verbatim):**
+
+- TODO / FIXME / XXX / HACK / DEPRECATED (total sites): `rg -c '\b(TODO|FIXME|XXX|HACK|DEPRECATED)\b' --glob '!node_modules/**' --glob '!vendor/**' --glob '!.venv/**' --glob '!dist/**' --glob '!build/**' --glob '!reports/**' --glob '!CHANGELOG.md' --glob '!CLAUDE.md' | awk -F: '{s+=$NF} END {print s+0}'`
+- Same marker, file count: replace `-c` with `-l` and `awk` with `wc -l`.
+
+Report the exact numbers. Spot-check a handful (the oldest-looking, the scariest-sounding) — the count is the metric, the spot-check is the evidence.
+
 **Probes:**
-- Grep for `TODO`, `FIXME`, `XXX`, `HACK`, `DEPRECATED`. Count and spot-check.
+- Run the canonical probe above.
 - Look for commented-out code blocks (lines starting with `//` or `#` that are clearly code). A small script: count consecutive comment lines that contain `(`, `=`, `;`.
 - Check for magic numbers in decision logic: grep for comparisons to numeric literals that aren't 0/1 (`if (x > 42)`, `if x < 3600`). Each magic number should ideally be a named constant.
 - Dead imports / unused exports: if the language has a detector (knip, ts-unused-exports, vulture, unused in Rust), check CI for it.
@@ -158,9 +193,19 @@ If you find anything that could be a real secret, redact it in the report (`<RED
 
 **Question:** Would a reviewer with a security hat on flag anything?
 
+**Canonical probes (run verbatim — the SQL-injection count specifically drifted between prior audits):**
+
+- Python raw-SQL interpolation (f-strings into execute): `rg -n 'execute\s*\(\s*f["\x27]' -t py --glob '!tests/**' --glob '!test/**' --glob '!reports/**'`
+- Python raw-SQL concatenation into execute/query: `rg -n 'execute\s*\([^)]*\+|query\s*\([^)]*\+' -t py --glob '!tests/**' --glob '!test/**' --glob '!reports/**'`
+- JS/TS string-concat into query (Postgres/mysql drivers): `rg -n 'query\s*\(\s*[`\x27"][^`\x27"]*\$\{' -t ts -t tsx -t js --glob '!node_modules/**' --glob '!tests/**'`
+- CORS wildcard: `rg -n 'allow_origins\s*=\s*\[\s*["\x27]\*["\x27]|Access-Control-Allow-Origin["\x27:]\s*\*' --glob '!node_modules/**' --glob '!reports/**'`
+- Sentry PII flag (grep for `send_default_pii=True`): `rg -n 'send_default_pii\s*=\s*True' -t py --glob '!reports/**'`
+
+Report every hit line. Every raw-SQL hit is a §6 Substantial Problem candidate regardless of overall grade.
+
 **Probes:**
 - Auth dependencies: find the auth middleware / dependency. Grep for routes that should require auth but don't declare the dependency.
-- SQL: grep for f-string / concatenation into `execute()` / `query()` / `raw()`. Any finding is immediate-action.
+- SQL: run the canonical probes above. Any finding is immediate-action.
 - ORM usage: is every query going through the ORM or query builder?
 - CORS: check for `allow_origins=["*"]` or equivalent in production config.
 - CSRF / OAuth state: if OAuth is present, check the state-parameter handling. Is `secrets.token_urlsafe` / `crypto.randomUUID` used? Is the state validated on callback?
@@ -249,9 +294,18 @@ If no frontend, mark `— N/A`.
 
 **Question:** When the app is running in production at 3 AM, what can you see?
 
+**Canonical probes (run verbatim):**
+
+- Sentry capture sites: `rg -c 'capture_exception|Sentry\.captureException|sentry_sdk\.capture_' --glob '!node_modules/**' --glob '!reports/**' | awk -F: '{s+=$NF} END {print s+0}'`
+- Apps with Sentry init (monorepo heuristic): `rg -l 'sentry_sdk\.init\(|Sentry\.init\(' --glob '!node_modules/**' --glob '!reports/**' | wc -l`
+- Correlation-ID plumbing: `rg -c '(request_id|trace_id|correlation_id|X-Request-Id)' --glob '!node_modules/**' --glob '!reports/**' | awk -F: '{s+=$NF} END {print s+0}'`
+- JSON logger presence: `rg -l 'python-json-logger|pino|zap|zerolog|JsonFormatter' --glob '!node_modules/**' --glob '!reports/**'`
+
+Report both absolute counts and (where meaningful) coverage ratios — e.g., "Sentry init in 13 of 42 apps = 31%".
+
 **Probes:**
+- Run the canonical probes above.
 - Logging format: plain `logging.info()` vs JSON formatter (`python-json-logger`, `pino`, `zap`, `zerolog`). JSON is required for aggregation.
-- Request correlation: grep for `request_id` / `trace_id` / `correlation_id`. Present?
 - Metrics endpoint: `/metrics`, Prometheus client, OTEL exporter.
 - Slow-query logging: SQLAlchemy `before_cursor_execute` / `after_cursor_execute` hook, or ORM-level `before_query`.
 - Sentry `before_send` with fingerprinting.
@@ -358,6 +412,22 @@ If the app stores no PII at all (public data, no accounts), mark `— N/A: no us
 ## 14. Dependency management & supply chain
 
 **Question:** Are third-party deps kept patched, and is the supply chain hardened against bad packages?
+
+**Canonical probes (run verbatim):**
+
+- Python over-pinned apps in a monorepo (common footgun — each app re-pinning transitive deps decouples it from any central upgrade strategy). Flags sub-projects with >15 exact pins in `requirements.txt`, `requirements-*.txt`, or `[project] dependencies` arrays:
+  ```
+  find . -path '*/node_modules' -prune -o -path '*/.venv' -prune -o -path '*/vendor' -prune -o \
+    \( -name 'requirements*.txt' -o -name 'constraints*.txt' \) -print 2>/dev/null \
+    | while IFS= read -r f; do
+        c=$(grep -cE '^[A-Za-z0-9_.-]+[[:space:]]*==' "$f" 2>/dev/null); c=${c:-0}
+        [ "${c}" -gt 15 ] 2>/dev/null && printf '  %s: %d pinned\n' "$f" "$c"
+      done
+  ```
+  Equivalent for Node (`package.json` with >15 exact-version `^`-less / `~`-less deps), Ruby (`Gemfile` lines with `'= x.y.z'`), Go (`go.mod` exact version count isn't a red flag — Go's semver is different). For monorepos, finding 2+ such apps is a §6 Substantial Problem candidate.
+- Dockerfile base-image pinning: `rg -n '^FROM\s+' -g '**/Dockerfile*' --glob '!reports/**'` and note which lines use `@sha256:` (pinned) vs plain tag (floating).
+
+Report the exact list of over-pinned apps with their pin counts, not just "several apps are over-pinned."
 
 **Probes:**
 - **Automation:**

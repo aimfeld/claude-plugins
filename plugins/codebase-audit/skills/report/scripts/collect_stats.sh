@@ -559,6 +559,179 @@ if [[ "${IDE_HIT}" = "0" ]]; then
   log "  (no IDE-committed inspection profile / editor config found — team relies on per-contributor editor defaults)"
 fi
 
+# ----- Credential file sweep -----
+# Path-based scan for credential-like files in git-tracked paths. This exists
+# because the Dim 4 content greps (git grep for API_KEY=, ghp_, -----BEGIN, …)
+# miss credential JSON files whose bodies are valid JSON for an OAuth client
+# — "client_secret" is a JSON *key* there, not one of the regex anchors.
+#
+# SECURITY INVARIANT. Secret bytes must never enter the LLM's context. This
+# section classifies files using grep -q (silent, exit-code only) so matched
+# content is never echoed on stdout. The audit skill quarantines every listed
+# path and treats it as read-forbidden — it cites paths, never reads bodies.
+# See dimensions.md Dim 4 "Quarantine rule" for the enforcement contract.
+#
+# Two tiers:
+#   HIGH_CONFIDENCE — filename alone is canonical evidence (.env, SSH keys,
+#                     client_secret*.json, anything under .creds/ etc.).
+#                     Drives the Secrets grade floor.
+#   REVIEW         — *.pem / *.key / generic credentials*.json / keystores.
+#                     These collide with test fixtures, public certs, CA
+#                     bundles. Bash classifies each via first-line PEM header
+#                     or JSON key-name grep; labels let the skill decide
+#                     whether to grade-floor.
+section "Credential file sweep"
+
+if [[ -d "${REPO}/.git" ]]; then
+  # Fixture / vendor / third-party path fragments — exclude before matching.
+  # Generic across Python/TS/Go/Rust/Java/Ruby/PHP/C# layouts.
+  CRED_EXCLUDE_RE='(^|/)(tests?|__tests__|spec/fixtures|cypress/fixtures|fixtures|testdata|test_data|mocks|node_modules|vendor|third_party|ca-certificates)(/|$)'
+
+  # HIGH_CONFIDENCE patterns: directory conventions + canonical credential basenames.
+  HC_RE='(^|/)\.(creds|credentials|secrets|keys)/|(^|/)(client_secret[^/]*\.json|service[_-]account[^/]*\.json|serviceAccountKey\.json|firebase-adminsdk-[^/]*\.json|kubeconfig|[^/]+\.kubeconfig|id_rsa|id_ed25519|id_ecdsa|id_dsa|\.env(\.[^./]+)?)$'
+  # Exclude sample/placeholder .env variants and public-half suffixes.
+  HC_EXCLUDE_RE='\.env\.(example|sample|template|dist|default|local\.example)$|(^|/)\.env\.example$|\.pub$|\.pub\.(key|pem)$'
+
+  # REVIEW patterns: real false-positive rate — classify via bash content probe.
+  REVIEW_RE='\.(pem|key|crt|cer|pfx|p12|keystore|jks)$|(^|/)credentials[^/]*\.json$|(^|/)gcp-[^/]*\.json$|(^|/)\.htpasswd$'
+  REVIEW_EXCLUDE_RE='\.pub\.(key|pem|crt|cer)$|(^|/)[^/]+\.pub$'
+
+  # --- Silent classifiers ---
+  # These use `grep -q` so matched file content is NEVER echoed on stdout.
+  # Only the classification string ("real-private-key", "public-cert-ignore",
+  # etc.) reaches the caller. This is the load-bearing guarantee that the
+  # audit skill's LLM context cannot be polluted with secret bytes.
+  classify_pem() {
+    local f="$1"
+    if   grep -qE '^-----BEGIN ([A-Z]+ )?PRIVATE KEY-----' "$f" 2>/dev/null; then
+      printf 'real-private-key'
+    elif grep -qE '^-----BEGIN ENCRYPTED PRIVATE KEY-----' "$f" 2>/dev/null; then
+      printf 'real-private-key-encrypted'
+    elif grep -qE '^-----BEGIN OPENSSH PRIVATE KEY-----' "$f" 2>/dev/null; then
+      printf 'real-private-key'
+    elif grep -qE '^-----BEGIN CERTIFICATE-----' "$f" 2>/dev/null; then
+      printf 'public-cert-ignore'
+    elif grep -qE '^-----BEGIN PUBLIC KEY-----' "$f" 2>/dev/null; then
+      printf 'public-key-ignore'
+    elif grep -qE '^-----BEGIN CERTIFICATE REQUEST-----' "$f" 2>/dev/null; then
+      printf 'csr-public-ignore'
+    else
+      printf 'unclassified'
+    fi
+  }
+
+  classify_json_cred() {
+    local f="$1"
+    # Match only JSON KEY NAMES, never VALUES. grep -q is silent.
+    if   grep -qE '"private_key"[[:space:]]*:' "$f" 2>/dev/null \
+      && grep -qE '"client_email"[[:space:]]*:' "$f" 2>/dev/null; then
+      printf 'real-gcp-service-account'
+    elif grep -qE '"client_secret"[[:space:]]*:' "$f" 2>/dev/null; then
+      printf 'real-oauth-client-secret'
+    elif grep -qE '"aws_access_key_id"[[:space:]]*:' "$f" 2>/dev/null; then
+      printf 'real-aws-credentials'
+    else
+      printf 'unclassified'
+    fi
+  }
+
+  classify_review() {
+    local f="$1"
+    case "$f" in
+      *.pem|*.key|*.crt|*.cer) classify_pem "$f" ;;
+      *.pfx|*.p12|*.keystore|*.jks) printf 'binary-keystore-not-inspected' ;;
+      *.json) classify_json_cred "$f" ;;
+      *.htpasswd|*/\.htpasswd) printf 'real-htpasswd' ;;
+      *) printf 'unclassified' ;;
+    esac
+  }
+
+  # Label HIGH_CONFIDENCE entries purely by filename convention — no content read.
+  label_hc() {
+    local path="$1"
+    case "${path}" in
+      *client_secret*.json)                                         printf 'real-oauth-client-secret' ;;
+      *service_account*.json|*service-account*.json|*serviceAccountKey.json|*firebase-adminsdk-*.json)
+                                                                    printf 'real-gcp-service-account' ;;
+      id_rsa|id_ed25519|id_ecdsa|id_dsa|*/id_rsa|*/id_ed25519|*/id_ecdsa|*/id_dsa)
+                                                                    printf 'ssh-private-key' ;;
+      kubeconfig|*/kubeconfig|*.kubeconfig)                         printf 'kubeconfig' ;;
+      .creds/*|.credentials/*|.secrets/*|.keys/*|*/.creds/*|*/.credentials/*|*/.secrets/*|*/.keys/*)
+                                                                    printf 'credential-dir-file' ;;
+      .env|*/\.env)                                                 printf 'env-file' ;;
+      *.env|*/\.env.*)                                              printf 'env-file' ;;
+      *)                                                            printf 'credential-file' ;;
+    esac
+  }
+
+  # Collect matches. `|| true` keeps `set -e`/pipefail happy when grep returns
+  # no matches (exit 1, which pipefail propagates). We want an empty list, not
+  # a script abort.
+  HC_LIST=$(git -C "${REPO}" ls-files 2>/dev/null \
+    | grep -Ev "${CRED_EXCLUDE_RE}" \
+    | grep -E "${HC_RE}" \
+    | grep -Ev "${HC_EXCLUDE_RE}" \
+    || true)
+
+  REVIEW_LIST_RAW=$(git -C "${REPO}" ls-files 2>/dev/null \
+    | grep -Ev "${CRED_EXCLUDE_RE}" \
+    | grep -E "${REVIEW_RE}" \
+    | grep -Ev "${REVIEW_EXCLUDE_RE}" \
+    || true)
+
+  # Remove HC overlap from REVIEW (HIGH_CONFIDENCE wins). Only subtract when
+  # both lists are non-empty — `grep -Fxv -f <(echo "")` would incorrectly
+  # drop every line as "matches the empty string".
+  if [[ -n "${HC_LIST}" ]] && [[ -n "${REVIEW_LIST_RAW}" ]]; then
+    REVIEW_LIST=$(printf '%s\n' "${REVIEW_LIST_RAW}" \
+      | grep -Fxv -f <(printf '%s\n' "${HC_LIST}") \
+      || true)
+  else
+    REVIEW_LIST="${REVIEW_LIST_RAW}"
+  fi
+
+  # Counts — empty string => 0, else wc -l on a newline-terminated list.
+  if [[ -z "${HC_LIST}" ]]; then
+    HC_COUNT=0
+  else
+    HC_COUNT=$(printf '%s\n' "${HC_LIST}" | wc -l | tr -d ' ')
+  fi
+  if [[ -z "${REVIEW_LIST}" ]]; then
+    REVIEW_COUNT=0
+  else
+    REVIEW_COUNT=$(printf '%s\n' "${REVIEW_LIST}" | wc -l | tr -d ' ')
+  fi
+
+  log "CREDENTIAL_FILES_HIGH_CONFIDENCE_COUNT: ${HC_COUNT}"
+  if [[ "${HC_COUNT}" != "0" ]]; then
+    log "CREDENTIAL_FILES_HIGH_CONFIDENCE:"
+    while IFS= read -r cred_path; do
+      [[ -z "${cred_path}" ]] && continue
+      cred_label=$(label_hc "${cred_path}")
+      printf '  %s\t%s\n' "${cred_path}" "${cred_label}" | tee -a "${OUT}"
+    done <<<"${HC_LIST}"
+  fi
+
+  log "CREDENTIAL_FILES_REVIEW_COUNT: ${REVIEW_COUNT}"
+  if [[ "${REVIEW_COUNT}" != "0" ]]; then
+    log "CREDENTIAL_FILES_REVIEW:"
+    while IFS= read -r cred_path; do
+      [[ -z "${cred_path}" ]] && continue
+      cred_label=$(classify_review "${REPO}/${cred_path}")
+      printf '  %s\t%s\n' "${cred_path}" "${cred_label}" | tee -a "${OUT}"
+    done <<<"${REVIEW_LIST}"
+  fi
+
+  if [[ "${HC_COUNT}" = "0" ]] && [[ "${REVIEW_COUNT}" = "0" ]]; then
+    log "(No suspicious credential files matched — expected baseline.)"
+  else
+    log ""
+    log "Quarantine reminder: the audit skill MUST NOT Read() any path listed"
+    log "above. Classification above was produced by silent grep -q probes so no"
+    log "file content has reached stdout. See dimensions.md Dim 4 'Quarantine rule'."
+  fi
+fi
+
 # ----- Environment tier -----
 # Classify what this environment can actually measure, so the skill can pick
 # the right Step 2b branch: warm (run tests straight away), partial (ask once

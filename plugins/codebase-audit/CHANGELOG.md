@@ -2,6 +2,15 @@
 
 All notable changes to the `codebase-audit` plugin are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] — 2026-04-21
+
+### Added
+- **Credential-file sweep in `collect_stats.sh`.** The script now scans `git ls-files` for credential-shaped filenames — `.env` (non-sample), SSH private keys, OAuth / GCP / AWS / Firebase credential JSONs, k8s configs, anything under `.creds/`/`.credentials/`/`.secrets/`/`.keys/`, TLS keystores — and emits two tiered blocks: `CREDENTIAL_FILES_HIGH_CONFIDENCE` for near-certain matches and `CREDENTIAL_FILES_REVIEW` for patterns with false-positive rate (`.pem`/`.key`/`.pfx`, generic `credentials*.json`). Closes the false-negative that let `.creds/client_secret_*.json` files slip through the previous content-only grep. Fixture-path exclusions (`tests/`, `__tests__/`, `fixtures/`, `vendor/`, `node_modules/`, `ca-certificates/`, etc.) keep test suites from lighting up the sweep.
+- **Non-leak-by-construction classification.** Every review-tier file is labeled via silent `grep -q` probes (PEM headers, JSON key-name presence) so file contents never reach stdout or the persisted stats file. Labels like `real-private-key`, `real-gcp-service-account`, `public-cert-ignore`, and `binary-keystore-not-inspected` let the skill grade without ever reading the body. Private keys, environment variable values, SSH secrets, and password bytes are guaranteed to stay out of the LLM's context. A new CI assertion seeds sentinel-bearing fixtures and fails the build if any sentinel appears in the script's output.
+- **Quarantine rule in `dimensions.md` Dim 4.** Any path surfaced by the credential sweep is **read-forbidden** for the remainder of the audit: no `Read`, `cat`, `head`, or context-emitting grep on those paths. The existing Dim 4 content greps (`git grep` for `API_KEY`, `ghp_`, `-----BEGIN`) now require `:(exclude)<path>` pathspecs for every `CREDENTIAL_FILES_*` entry so a committed `.env` cannot leak its values through a pattern match.
+- **Secrets grade floor.** Any `CREDENTIAL_FILES_HIGH_CONFIDENCE` hit, or any `CREDENTIAL_FILES_REVIEW` hit with a `real-*` or `binary-keystore-not-inspected` label, caps the Secrets dimension at **D** until the file is rotated, its git history is filtered, and its path is added to `.gitignore`. Directly closes the audit-inflation pattern that let Secrets climb to A− while an OAuth client secret was still committed.
+- **Canonical probes for counted metrics in `dimensions.md`.** Dims 3 (bare excepts), 5 (TODO/FIXME), 7 (raw-SQL injection / CORS wildcard / Sentry PII), 10 (Sentry coverage / correlation IDs), and 14 (over-pinned apps in monorepos) now ship exact `rg`/`find` commands to run verbatim, with fixed exclusion lists. Pins the methodology so two runs on the same code produce the same numbers, and closes the reliability gap where a 23% drift in bare-except counts was driven by grep-scope drift rather than real code change.
+
 ## [0.4.1] — 2026-04-20
 
 ### Fixed
@@ -61,6 +70,7 @@ All notable changes to the `codebase-audit` plugin are documented here. Format f
 ### Added
 - Initial release: 16-dimension quality assessment skill with evidence-based grading and `file:line` citations.
 
+[0.5.0]: https://github.com/aimfeld/claude-plugins/releases/tag/codebase-audit-v0.5.0
 [0.4.1]: https://github.com/aimfeld/claude-plugins/releases/tag/codebase-audit-v0.4.1
 [0.4.0]: https://github.com/aimfeld/claude-plugins/releases/tag/codebase-audit-v0.4.0
 [0.3.0]: https://github.com/aimfeld/claude-plugins/releases/tag/codebase-audit-v0.3.0
