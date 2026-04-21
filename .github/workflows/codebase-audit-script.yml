@@ -36,7 +36,128 @@ jobs:
         run: |
           OUT="${TMPDIR:-/tmp}/quality-assessment-stats.txt"
           test -s "$OUT" || { echo "output file missing or empty: $OUT" >&2; exit 1; }
-          for header in "=== Identity ===" "=== LOC breakdown ===" "=== Git activity" "=== Environment tier ===" "ENVIRONMENT_TIER:"; do
+          for header in "=== Identity ===" "=== LOC breakdown ===" "=== Git activity" "=== Credential file sweep ===" "CREDENTIAL_FILES_HIGH_CONFIDENCE_COUNT:" "CREDENTIAL_FILES_REVIEW_COUNT:" "=== Environment tier ===" "ENVIRONMENT_TIER:"; do
             grep -qF "$header" "$OUT" || { echo "missing expected marker: $header" >&2; exit 1; }
           done
           echo "All expected markers present."
+
+      - name: Credential-sweep fixture — seeds sentinel secrets, asserts no leak
+        run: |
+          # This is the load-bearing security test. It seeds a throwaway git
+          # repo with credential-shaped files containing recognizable SENTINEL
+          # strings, runs collect_stats.sh against that repo, and asserts the
+          # sentinels NEVER appear in the script's stdout or in its persisted
+          # output file. The script classifies via silent grep -q, so secret
+          # bytes must not reach the LLM's context — this CI check is what
+          # catches any regression that breaks that guarantee.
+          set -e
+          FIXTURE=$(mktemp -d)
+          cd "$FIXTURE"
+          git init -q
+          git config user.email t@t.com
+          git config user.name t
+
+          mkdir -p .creds apps/foo/deploy tests/fixtures
+
+          cat > .creds/client_secret_ACME-TOKEN.json <<'JSON'
+          {
+            "installed": {
+              "client_id": "abc.apps.googleusercontent.com",
+              "client_secret": "TEST_SENTINEL_OAUTH_SECRET_AAAA_BBBB"
+            }
+          }
+          JSON
+          echo 'STRIPE_SECRET_KEY=sk_live_TEST_ENV_SENTINEL_CCCC_DDDD' > .env
+          echo '# placeholder' > .env.example
+
+          cat > id_rsa <<'KEY'
+          -----BEGIN OPENSSH PRIVATE KEY-----
+          TEST_SENTINEL_SSH_PRIVATE_KEY_EEEE_FFFF
+          -----END OPENSSH PRIVATE KEY-----
+          KEY
+
+          cat > apps/foo/deploy/server.pem <<'PEM'
+          -----BEGIN PRIVATE KEY-----
+          TEST_SENTINEL_PEM_PRIVATE_GGGG_HHHH
+          -----END PRIVATE KEY-----
+          PEM
+
+          cat > apps/foo/deploy/server.crt <<'CRT'
+          -----BEGIN CERTIFICATE-----
+          TEST_SENTINEL_CERT_PUBLIC_IIII_JJJJ
+          -----END CERTIFICATE-----
+          CRT
+
+          cat > credentials.json <<'GCP'
+          {
+            "type": "service_account",
+            "private_key": "TEST_SENTINEL_GCP_PRIVATE_KKKK_LLLL",
+            "client_email": "foo@bar.iam.gserviceaccount.com"
+          }
+          GCP
+
+          # Fixture-directory file — must be excluded entirely.
+          cat > tests/fixtures/test.key <<'FIX'
+          -----BEGIN PRIVATE KEY-----
+          TEST_SENTINEL_FIXTURE_KEY_MMMM_NNNN
+          -----END PRIVATE KEY-----
+          FIX
+          # Public half — must be excluded by suffix.
+          echo "ssh-ed25519 AAAA..." > id_rsa.pub
+
+          git add -A
+          git commit -q -m "seed"
+
+          STDOUT_FILE=$(mktemp)
+          /bin/bash "$GITHUB_WORKSPACE/plugins/codebase-audit/skills/report/scripts/collect_stats.sh" "$FIXTURE" > "$STDOUT_FILE" 2>&1
+
+          PERSIST="${TMPDIR:-/tmp}/quality-assessment-stats.txt"
+
+          fail=0
+          for sentinel in \
+              TEST_SENTINEL_OAUTH_SECRET \
+              TEST_ENV_SENTINEL \
+              TEST_SENTINEL_SSH_PRIVATE \
+              TEST_SENTINEL_PEM_PRIVATE \
+              TEST_SENTINEL_CERT_PUBLIC \
+              TEST_SENTINEL_GCP_PRIVATE \
+              TEST_SENTINEL_FIXTURE_KEY
+          do
+            if grep -q "$sentinel" "$STDOUT_FILE"; then
+              echo "FAIL: sentinel '$sentinel' leaked to stdout" >&2
+              fail=1
+            fi
+            if grep -q "$sentinel" "$PERSIST"; then
+              echo "FAIL: sentinel '$sentinel' leaked to persisted output" >&2
+              fail=1
+            fi
+          done
+
+          # Expected paths + labels must appear.
+          for expected in \
+              "CREDENTIAL_FILES_HIGH_CONFIDENCE_COUNT: 3" \
+              "CREDENTIAL_FILES_REVIEW_COUNT: 3" \
+              ".creds/client_secret_ACME-TOKEN.json	real-oauth-client-secret" \
+              ".env	env-file" \
+              "id_rsa	ssh-private-key" \
+              "apps/foo/deploy/server.pem	real-private-key" \
+              "apps/foo/deploy/server.crt	public-cert-ignore" \
+              "credentials.json	real-gcp-service-account"
+          do
+            if ! grep -qF "$expected" "$PERSIST"; then
+              echo "FAIL: expected marker '$expected' missing from output" >&2
+              fail=1
+            fi
+          done
+
+          # Fixture-directory and public-half files must NOT appear.
+          for excluded in "tests/fixtures/test.key" "id_rsa.pub"; do
+            if grep -qF "$excluded" "$PERSIST"; then
+              echo "FAIL: excluded path '$excluded' unexpectedly listed" >&2
+              fail=1
+            fi
+          done
+
+          rm -rf "$FIXTURE" "$STDOUT_FILE"
+          if [ "$fail" -ne 0 ]; then exit 1; fi
+          echo "Credential-sweep leak test PASSED — no sentinels leaked, all expected labels present."
