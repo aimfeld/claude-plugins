@@ -88,7 +88,7 @@ Grades on a standard A–F scale with `+`/`−` half-steps. Dimensions without e
 /plugin install codebase-audit@aimfeld
 ```
 
-## Updating
+## Update
 
 Third-party marketplaces have auto-update **disabled by default** in Claude Code — only the official Anthropic marketplace auto-updates out of the box. To receive new versions of this plugin automatically, turn auto-update on once:
 
@@ -106,7 +106,7 @@ To update on demand (works whether or not auto-update is on):
 /reload-plugins
 ```
 
-Requires Claude Code ≥ 2.0.70 for native marketplace auto-update. See [CHANGELOG.md](./CHANGELOG.md) for what's in each release.
+See [CHANGELOG.md](./CHANGELOG.md) for what's in each release.
 
 ## Use
 
